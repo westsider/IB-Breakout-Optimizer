@@ -186,6 +186,7 @@ def _mmap_backtest_worker(
     trailing_stop_atr_mult = params.get('trailing_stop_atr_mult', 2.0)
     break_even_enabled = params.get('break_even_enabled', False)
     break_even_pct = params.get('break_even_pct', 0.5)
+    use_qqq_filter = params.get('use_qqq_filter', False)
 
     # Parse max_breakout_time (e.g., "14:00" -> hour=14, minute=0)
     max_breakout_str = params.get('max_breakout_time', '14:00')
@@ -235,6 +236,124 @@ def _mmap_backtest_worker(
     # Calculate IB ranges
     ib_ranges = np.where(ib_lows > 0, (ib_highs - ib_lows) / ib_lows * 100, 0)
 
+    # =========================================================================
+    # QQQ FILTER LOGIC
+    # If use_qqq_filter is True, calculate QQQ IB levels and track breakouts.
+    # Primary ticker can only break out if QQQ broke first in the same direction.
+    #
+    # IMPORTANT: The date indices for primary and filter are independent, so we
+    # need to map them using timestamps to find matching dates.
+    # =========================================================================
+    import pandas as pd
+
+    # Maps: primary_date_idx -> (qqq_broke_long_time, qqq_broke_short_time)
+    # Times are in minutes from midnight, -1 means no breakout
+    qqq_breakout_times = {}  # {primary_date_idx: {'long': time_minutes, 'short': time_minutes}}
+
+    if use_qqq_filter and 'filter' in arrays:
+        filter_data = arrays['filter']
+        f_timestamps = filter_data['timestamps']
+        f_highs = filter_data['highs']
+        f_lows = filter_data['lows']
+        f_date_indices = filter_data['date_indices']
+        f_hours = filter_data['hours']
+        f_minutes = filter_data['minutes']
+        f_n_bars = filter_data['n_bars']
+
+        # Find the max date index in filter data
+        f_n_dates = int(f_date_indices.max()) + 1 if f_n_bars > 0 else 0
+
+        # Calculate QQQ IB levels for each filter date index
+        filter_ib_highs = np.zeros(f_n_dates)
+        filter_ib_lows = np.full(f_n_dates, np.inf)
+
+        for i in range(f_n_bars):
+            h = f_hours[i]
+            m = f_minutes[i]
+
+            # Check if in IB window (same logic as primary)
+            in_ib = False
+            if h == 9 and m >= 30:
+                in_ib = True
+            elif h == ib_end_hour and m < ib_end_minute:
+                in_ib = True
+            elif h > 9 and h < ib_end_hour:
+                in_ib = True
+
+            if in_ib:
+                f_date_idx = f_date_indices[i]
+                if f_highs[i] > filter_ib_highs[f_date_idx]:
+                    filter_ib_highs[f_date_idx] = f_highs[i]
+                if f_lows[i] < filter_ib_lows[f_date_idx]:
+                    filter_ib_lows[f_date_idx] = f_lows[i]
+
+        # Replace inf with 0
+        filter_ib_lows[filter_ib_lows == np.inf] = 0
+
+        # Track when QQQ breaks its IB for each filter date index
+        # Store as time in minutes from midnight, -1 means no breakout
+        filter_broke_long_time = np.full(f_n_dates, -1, dtype=np.int32)  # minutes from midnight
+        filter_broke_short_time = np.full(f_n_dates, -1, dtype=np.int32)
+
+        for i in range(f_n_bars):
+            f_date_idx = f_date_indices[i]
+            h = f_hours[i]
+            m = f_minutes[i]
+            bar_minutes = h * 60 + m
+
+            # Only check for breakouts after IB ends
+            ib_end_minutes = ib_end_hour * 60 + ib_end_minute
+            if bar_minutes < ib_end_minutes:
+                continue
+
+            f_ib_high = filter_ib_highs[f_date_idx]
+            f_ib_low = filter_ib_lows[f_date_idx]
+
+            if f_ib_high == 0 or f_ib_low == 0:
+                continue
+
+            # Check for QQQ long breakout (first one only)
+            if filter_broke_long_time[f_date_idx] == -1 and f_highs[i] > f_ib_high:
+                filter_broke_long_time[f_date_idx] = bar_minutes
+
+            # Check for QQQ short breakout (first one only)
+            if filter_broke_short_time[f_date_idx] == -1 and f_lows[i] < f_ib_low:
+                filter_broke_short_time[f_date_idx] = bar_minutes
+
+        # Build a mapping from filter date to breakout times
+        # We'll use the timestamp to get actual date for each filter date index
+        filter_date_to_breakout = {}  # {date_as_int: {'long': time, 'short': time}}
+
+        for i in range(f_n_bars):
+            f_date_idx = f_date_indices[i]
+            # Get the date from the timestamp (just need one bar per date)
+            ts_ns = f_timestamps[i]
+            date_int = int(pd.Timestamp(ts_ns, unit='ns').date().toordinal())
+
+            if date_int not in filter_date_to_breakout:
+                filter_date_to_breakout[date_int] = {
+                    'long': int(filter_broke_long_time[f_date_idx]),
+                    'short': int(filter_broke_short_time[f_date_idx])
+                }
+
+        # Now map primary date indices to filter breakout times
+        timestamps = arrays['timestamps']
+        primary_date_to_idx = {}  # date_int -> primary_date_idx
+        for i in range(n_bars):
+            d_idx = date_indices[i]
+            if d_idx not in primary_date_to_idx.values():
+                ts_ns = timestamps[i]
+                date_int = int(pd.Timestamp(ts_ns, unit='ns').date().toordinal())
+                primary_date_to_idx[date_int] = d_idx
+
+        # Build final mapping: primary_date_idx -> QQQ breakout times
+        for date_int, p_idx in primary_date_to_idx.items():
+            if date_int in filter_date_to_breakout:
+                qqq_breakout_times[p_idx] = filter_date_to_breakout[date_int]
+            else:
+                # No QQQ data for this date - no trades allowed
+                qqq_breakout_times[p_idx] = {'long': -1, 'short': -1}
+
     # Find breakouts and simulate trades
     entry_indices = []
     entry_prices = []
@@ -258,15 +377,11 @@ def _mmap_backtest_worker(
             continue
 
         # Check if in post-IB trading window (after IB ends, before max_breakout_time)
-        in_window = False
         bar_minutes = h * 60 + m
         ib_end_minutes = ib_end_hour * 60 + ib_end_minute
         max_breakout_minutes = max_breakout_hour * 60 + max_breakout_minute
 
-        if bar_minutes >= ib_end_minutes and bar_minutes <= max_breakout_minutes:
-            in_window = True
-
-        if not in_window:
+        if bar_minutes < ib_end_minutes or bar_minutes > max_breakout_minutes:
             continue
 
         # Check IB range filter
@@ -275,21 +390,64 @@ def _mmap_backtest_worker(
             found_breakout = True  # Skip this day
             continue
 
-        # Check for breakout
+        # Get primary IB levels
         ib_high = ib_highs[date_idx]
         ib_low = ib_lows[date_idx]
 
         if ib_high == 0 or ib_low == 0:
             continue
 
-        # Use HIGH/LOW for breakout detection (more sensitive, detects intrabar breakouts)
-        long_break = highs[i] > ib_high
-        short_break = lows[i] < ib_low
+        # =====================================================================
+        # BREAKOUT LOGIC
+        # There are two modes:
+        # 1. Direct breakout (no QQQ filter): Enter when PRIMARY breaks its IB
+        # 2. QQQ filter mode: Enter when QQQ breaks its IB, in QQQ's direction
+        #    (Primary doesn't need to break, just needs IB calculated)
+        # =====================================================================
 
-        if trade_direction == "long_only":
-            short_break = False
-        elif trade_direction == "short_only":
-            long_break = False
+        long_break = False
+        short_break = False
+
+        if use_qqq_filter and qqq_breakout_times:
+            # QQQ filter mode: Entry triggered by QQQ breakout, not primary
+            # Match BacktestRunner: when QQQ breaks, enter same direction on primary
+            if date_idx in qqq_breakout_times:
+                qqq_times = qqq_breakout_times[date_idx]
+                qqq_long_time = qqq_times['long']
+                qqq_short_time = qqq_times['short']
+
+                # Check if QQQ broke long at or before this bar
+                if qqq_long_time != -1 and qqq_long_time <= bar_minutes:
+                    # QQQ broke long - enter long on primary (if not filtered by direction)
+                    if trade_direction != "short_only":
+                        long_break = True
+
+                # Check if QQQ broke short at or before this bar (and no long entry yet)
+                if not long_break and qqq_short_time != -1 and qqq_short_time <= bar_minutes:
+                    # QQQ broke short - enter short on primary (if not filtered by direction)
+                    if trade_direction != "long_only":
+                        short_break = True
+
+                # Tie-breaker: if both broke at same time, prefer long (matches backtest)
+                # Actually, prefer whichever broke first
+                if long_break and short_break:
+                    if qqq_long_time <= qqq_short_time:
+                        short_break = False
+                    else:
+                        long_break = False
+            else:
+                # No QQQ data for this date - no entry allowed
+                pass
+        else:
+            # Direct breakout mode: Enter when PRIMARY breaks its IB
+            # Use HIGH/LOW for breakout detection (matches NinjaTrader)
+            long_break = highs[i] > ib_high
+            short_break = lows[i] < ib_low
+
+            if trade_direction == "long_only":
+                short_break = False
+            elif trade_direction == "short_only":
+                long_break = False
 
         if long_break or short_break:
             found_breakout = True
