@@ -16,6 +16,8 @@ The IB Breakout strategy trades breakouts from the "Initial Balance" - the price
 ### Desktop Application (PySide6)
 A native desktop app with real-time progress updates and professional UI:
 
+![Optimization Tab](docs/images/optimization_tab.png)
+
 - **Backtest Tab**: Run single backtests with configurable parameters
 - **Optimization Tab**: Grid search with live progress, elapsed time, and ETA
 - **Equity Curve Tab**: Interactive equity and drawdown charts
