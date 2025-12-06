@@ -75,10 +75,10 @@ class BacktestTab(QWidget):
         self.stop_loss_combo.addItems(["opposite_ib", "match_target"])
         basic_layout.addWidget(self.stop_loss_combo, 3, 1)
 
-        # IB Duration
+        # IB Duration (must match optimizer range: 15-60 step 5)
         basic_layout.addWidget(QLabel("IB Duration:"), 4, 0)
         self.ib_duration_combo = QComboBox()
-        self.ib_duration_combo.addItems(["15", "30", "45", "60"])
+        self.ib_duration_combo.addItems(["15", "20", "25", "30", "35", "40", "45", "50", "55", "60"])
         self.ib_duration_combo.setCurrentText("30")
         basic_layout.addWidget(self.ib_duration_combo, 4, 1)
 
@@ -344,6 +344,8 @@ class BacktestTab(QWidget):
 
     def load_params_from_json(self, params: dict):
         """Load parameters from optimization results."""
+        print(f"[DEBUG] Loading params: {params}")
+
         # Basic parameters
         if 'trade_direction' in params:
             idx = self.direction_combo.findText(params['trade_direction'])
