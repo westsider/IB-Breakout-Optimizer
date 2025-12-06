@@ -468,12 +468,6 @@ class TradeBrowserTab(QWidget):
                 symbolSize=14
             )
 
-            # Entry horizontal line
-            self.chart_widget.addLine(
-                y=trade.entry_price,
-                pen=pg.mkPen(entry_color, width=1, style=Qt.DashLine)
-            )
-
             # Entry label
             entry_text = pg.TextItem(
                 f"Entry: ${trade.entry_price:.2f}",
@@ -494,12 +488,6 @@ class TradeBrowserTab(QWidget):
                 symbolPen=exit_color,
                 symbolBrush=exit_color,
                 symbolSize=14
-            )
-
-            # Exit horizontal line
-            self.chart_widget.addLine(
-                y=trade.exit_price,
-                pen=pg.mkPen(exit_color, width=1, style=Qt.DashLine)
             )
 
             # Exit label
