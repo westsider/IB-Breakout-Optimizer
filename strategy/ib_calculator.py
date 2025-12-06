@@ -286,32 +286,32 @@ class IBBreakoutDetector:
             long_trigger = ib.ib_high
             short_trigger = ib.ib_low
 
-        # Check for LONG breakout
+        # Check for LONG breakout (use HIGH for intra-bar breakout detection)
         if self.allow_long:
             if self.ib_proximity_percent > 0:
                 # Proximity: close >= trigger level
                 long_condition = close >= long_trigger
             else:
-                # Exact: close > IB High
-                long_condition = close > ib.ib_high
+                # Exact: high > IB High (matches NinjaTrader and mmap optimizer)
+                long_condition = bar.high > ib.ib_high
 
             if long_condition:
                 trigger_type = f"within {self.ib_proximity_percent}% of" if self.ib_proximity_percent > 0 else "above"
-                desc = f"LONG breakout {trigger_type} IB High {ib.ib_high:.2f} at {close:.2f}"
+                desc = f"LONG breakout {trigger_type} IB High {ib.ib_high:.2f} at {bar.high:.2f}"
                 return (True, True, desc)
 
-        # Check for SHORT breakout
+        # Check for SHORT breakout (use LOW for intra-bar breakout detection)
         if self.allow_short:
             if self.ib_proximity_percent > 0:
                 # Proximity: close <= trigger level
                 short_condition = close <= short_trigger
             else:
-                # Exact: close < IB Low
-                short_condition = close < ib.ib_low
+                # Exact: low < IB Low (matches NinjaTrader and mmap optimizer)
+                short_condition = bar.low < ib.ib_low
 
             if short_condition:
                 trigger_type = f"within {self.ib_proximity_percent}% of" if self.ib_proximity_percent > 0 else "below"
-                desc = f"SHORT breakout {trigger_type} IB Low {ib.ib_low:.2f} at {close:.2f}"
+                desc = f"SHORT breakout {trigger_type} IB Low {ib.ib_low:.2f} at {bar.low:.2f}"
                 return (True, False, desc)
 
         return (False, False, None)

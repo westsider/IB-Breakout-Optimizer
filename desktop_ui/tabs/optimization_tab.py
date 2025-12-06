@@ -854,8 +854,13 @@ class OptimizationTab(QWidget):
         if row >= len(self.top_results_data):
             return
 
-        result = self.top_results_data[row]
+        result = self.top_results_data[row].copy()  # Copy to avoid modifying original
         ticker = self.ticker_combo.currentText()
+
+        # Add QQQ filter setting from the checkbox (may not be in result params)
+        # This ensures the backtest uses the same filter setting as the optimization
+        if 'use_qqq_filter' not in result:
+            result['use_qqq_filter'] = self.qqq_filter_check.isChecked() and ticker != 'QQQ'
 
         # Emit signal with params and ticker for main window to handle
         self.result_double_clicked.emit(result, ticker)

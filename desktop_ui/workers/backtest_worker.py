@@ -26,7 +26,8 @@ class BacktestWorker(QThread):
     def run(self):
         """Execute the full backtest using BacktestRunner."""
         try:
-            self.status.emit(f"Running backtest for {self.ticker}...")
+            use_qqq = self.params.get('use_qqq_filter', False)
+            self.status.emit(f"Running backtest for {self.ticker} (QQQ filter: {use_qqq})...")
 
             from backtester.backtest_runner import BacktestRunner
             from strategy.ib_breakout import StrategyParams
@@ -37,7 +38,7 @@ class BacktestWorker(QThread):
                 profit_target_percent=self.params.get('profit_target_percent', 0.5),
                 stop_loss_type=self.params.get('stop_loss_type', 'opposite_ib'),
                 trade_direction=self.params.get('trade_direction', 'both'),
-                use_qqq_filter=self.params.get('use_qqq_filter', False),
+                use_qqq_filter=use_qqq,
                 min_ib_range_percent=self.params.get('min_ib_range_percent', 0.0),
                 max_ib_range_percent=self.params.get('max_ib_range_percent', 100.0),
                 max_breakout_time=self.params.get('max_breakout_time', '14:00'),
