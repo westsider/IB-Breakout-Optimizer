@@ -8,7 +8,7 @@ This file provides context and guidance for Claude Code when working with this p
 
 **Purpose**: Custom Python backtester with continuous learning/self-optimization for the IB (Initial Balance) Breakout trading strategy. Optimized parameters are exported to NinjaTrader for live trading.
 
-**Status**: Phase 4 complete with both Streamlit UI and native Desktop App (PySide6). Ready for Phase 5 (Continuous Learning) or Phase 6 (ML Filter).
+**Status**: Phase 5 complete with continuous learning/monitoring system. Ready for Phase 6 (ML Filter) or Phase 7 (Portfolio View).
 
 ---
 
@@ -47,7 +47,7 @@ This file provides context and guidance for Claude Code when working with this p
 
 **Desktop App (PySide6) - Primary**
 - Native desktop application with professional dark theme
-- 5 tabs: Optimization, Equity Curve, Trade Browser, IB Analysis, Download
+- 6 tabs: Optimization, Equity Curve, Trade Browser, IB Analysis, Monitoring, Download
 - QThread workers for non-blocking background processing
 - Live progress updates with elapsed time and ETA
 - Two-phase optimization (Grid + Bayesian) with presets (quick, standard, full, thorough)
@@ -56,6 +56,7 @@ This file provides context and guidance for Claude Code when working with this p
 - Results persisted between app launches
 - Desktop shortcut and batch file launcher
 - K-Ratio optimization objective for smooth equity curves
+- Double-click optimization result to populate Trade Browser, Equity Curve, IB Analysis, and Monitoring tabs
 
 **Streamlit App - Alternative**
 - Streamlit app scaffold (`ui/app.py`)
@@ -68,9 +69,47 @@ This file provides context and guidance for Claude Code when working with this p
 - Results viewer for loading saved optimizations
 - Reusable chart components
 
+#### Phase 5: Continuous Learning (Complete)
+
+**Monitoring Module** (`monitoring/`)
+- `performance_monitor.py` - Rolling metrics over configurable windows (20, 50, 100 trades)
+  - Sharpe ratio, win rate, profit factor, max drawdown
+  - Consecutive win/loss tracking
+  - Recent vs long-term performance comparison
+- `regime_detector.py` - Market regime detection
+  - Volatility regime (LOW, MEDIUM, HIGH, EXTREME) based on ATR percentile
+  - Trend regime (STRONG_UP to STRONG_DOWN) using MA slopes
+  - Correlation regime with market index (QQQ)
+- `degradation_detector.py` - Performance degradation alerts
+  - Configurable thresholds (min Sharpe, min win rate, max drawdown, etc.)
+  - Alert severity levels (INFO, WARNING, CRITICAL)
+  - Health score calculation (0-100)
+- `reoptimization_trigger.py` - Automated re-optimization triggers
+  - Critical degradation trigger
+  - Sustained poor performance trigger
+  - Regime shift trigger
+  - Scheduled interval trigger
+  - New data trigger
+- `data_updater.py` - Polygon.io data update automation
+  - Auto-detect last data date in files
+  - Incremental updates (append new bars)
+  - Rate-limited API calls for free tier
+
+**Monitoring Tab** in Desktop App
+- Health score dashboard with color-coded status
+- Rolling metrics cards with window selection
+- Market regime display (volatility, trend, correlation)
+- Active alerts table with acknowledge function
+- Data update status and controls
+
 ### Pending Phases
 
-#### Phase 4.5: Portfolio View Tab (Not Started)
+#### Phase 6: ML Filter (Not Started)
+- Feature builder (IB size, time-of-day, volume, QQQ confirm)
+- Train win/loss classifier (LightGBM/XGBoost)
+- Integrate as trade filter with probability threshold
+
+#### Phase 7: Portfolio View Tab (Not Started)
 - New "Portfolio" tab in desktop app
 - Multi-ticker selection (checkboxes for AAPL, TSLA, MSFT, NVDA, etc.)
 - Load best optimization results for each selected ticker
@@ -81,19 +120,6 @@ This file provides context and guidance for Claude Code when working with this p
   - Max portfolio drawdown
   - Correlation matrix between ticker returns
 - Per-ticker breakdown table showing individual contributions
-
-#### Phase 5: Continuous Learning (Not Started)
-- Performance monitoring (rolling Sharpe, win rate)
-- Regime detection (volatility, trend, correlation)
-- Degradation detection
-- Re-optimization triggers
-- Alert system (Discord/email)
-- Daily data update automation
-
-#### Phase 6: ML Filter (Not Started)
-- Feature builder (IB size, time-of-day, volume, QQQ confirm)
-- Train win/loss classifier (LightGBM/XGBoost)
-- Integrate as trade filter with probability threshold
 
 ---
 
@@ -138,15 +164,23 @@ C:\Users\Warren\Projects\ib_breakout_optimizer\
 │   ├── two_phase_optimizer.py # Grid + Bayesian hybrid
 │   └── walk_forward.py        # Walk-forward analysis
 │
+├── monitoring/                # Phase 5: Continuous Learning
+│   ├── __init__.py            # Module exports
+│   ├── performance_monitor.py # Rolling metrics tracker
+│   ├── regime_detector.py     # Market regime detection
+│   ├── degradation_detector.py # Performance alerts
+│   ├── reoptimization_trigger.py # Re-opt triggers
+│   └── data_updater.py        # Polygon.io data updates
+│
 ├── desktop_ui/                # PySide6 Desktop App (Primary)
 │   ├── main.py                # App entry point
 │   ├── main_window.py         # Main window with tabs
 │   ├── tabs/
-│   │   ├── backtest_tab.py    # Backtest configuration
 │   │   ├── optimization_tab.py # Grid search with live progress
 │   │   ├── equity_curve_tab.py # Equity/drawdown charts
 │   │   ├── trade_browser_tab.py # Trade list with charts
 │   │   ├── ib_analysis_tab.py # IB size/day analysis
+│   │   ├── monitoring_tab.py  # Phase 5 monitoring dashboard
 │   │   └── download_tab.py    # Polygon.io data download
 │   ├── workers/
 │   │   ├── backtest_worker.py # Background backtest thread

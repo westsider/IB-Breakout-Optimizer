@@ -14,6 +14,7 @@ from desktop_ui.tabs.trade_browser_tab import TradeBrowserTab
 from desktop_ui.tabs.ib_analysis_tab import IBAnalysisTab
 from desktop_ui.tabs.equity_curve_tab import EquityCurveTab
 from desktop_ui.tabs.download_tab import DownloadTab
+from desktop_ui.tabs.monitoring_tab import MonitoringTab
 from desktop_ui.workers.backtest_worker import BacktestWorker
 
 
@@ -113,6 +114,7 @@ class MainWindow(QMainWindow):
         self.trade_browser_tab = TradeBrowserTab(self.data_dir)
         self.ib_analysis_tab = IBAnalysisTab()
         self.equity_curve_tab = EquityCurveTab()
+        self.monitoring_tab = MonitoringTab(self.data_dir)
         self.download_tab = DownloadTab(self.data_dir)
 
         # Connect tabs for sharing data
@@ -127,6 +129,7 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.equity_curve_tab, "Equity Curve")
         self.tabs.addTab(self.trade_browser_tab, "Trade Browser")
         self.tabs.addTab(self.ib_analysis_tab, "IB Analysis")
+        self.tabs.addTab(self.monitoring_tab, "Monitoring")
         self.tabs.addTab(self.download_tab, "Download")
 
         # Restore last active tab
@@ -179,6 +182,7 @@ class MainWindow(QMainWindow):
             self.optimization_tab.set_data_dir(directory)
             self.download_tab.set_data_dir(directory)
             self.trade_browser_tab.set_data_dir(directory)
+            self.monitoring_tab.set_data_dir(directory)
 
             self.status_label.setText(f"Data directory set to: {directory}")
 
@@ -235,6 +239,9 @@ class MainWindow(QMainWindow):
 
             # Populate IB Analysis
             self.ib_analysis_tab.load_trades(trades)
+
+            # Populate Monitoring tab
+            self.monitoring_tab.load_trades(trades)
 
             # Switch to Equity Curve tab to show results
             self.tabs.setCurrentWidget(self.equity_curve_tab)
