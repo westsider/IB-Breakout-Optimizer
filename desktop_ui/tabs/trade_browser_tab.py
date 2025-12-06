@@ -503,17 +503,6 @@ class TradeBrowserTab(QWidget):
             exit_text.setPos(exit_idx - 1, trade.exit_price)
             self.chart_widget.addItem(exit_text)
 
-            # Shade the trade region
-            if entry_idx is not None:
-                region = pg.LinearRegionItem(
-                    values=[entry_idx, exit_idx],
-                    orientation='vertical',
-                    brush=pg.mkBrush(exit_color + '20'),  # Semi-transparent
-                    pen=pg.mkPen(None),
-                    movable=False
-                )
-                self.chart_widget.addItem(region)
-
         # Set axis ranges
         self.chart_widget.setYRange(y_min, y_max, padding=0.02)
         self.chart_widget.setXRange(0, len(bars), padding=0.02)
@@ -522,10 +511,11 @@ class TradeBrowserTab(QWidget):
         if trade.ib and trade.ib.ib_high > 0 and trade.ib.ib_low < float('inf'):
             ib = trade.ib
 
-            # IB High line (grey dashed) - use InfiniteLine for full-width line
-            ib_high_line = pg.InfiniteLine(
-                pos=ib.ib_high,
-                angle=0,  # horizontal
+            # IB High line (grey dashed) - starts at market open (ib_start_idx)
+            line_start_x = ib_start_idx if ib_start_idx is not None else 0
+            ib_high_line = pg.PlotDataItem(
+                x=[line_start_x, len(bars)],
+                y=[ib.ib_high, ib.ib_high],
                 pen=pg.mkPen('#888888', width=1.5, style=Qt.DashLine)
             )
             self.chart_widget.addItem(ib_high_line)
@@ -538,10 +528,10 @@ class TradeBrowserTab(QWidget):
             ib_high_text.setPos(len(bars) - 2, ib.ib_high)
             self.chart_widget.addItem(ib_high_text)
 
-            # IB Low line (grey dashed)
-            ib_low_line = pg.InfiniteLine(
-                pos=ib.ib_low,
-                angle=0,  # horizontal
+            # IB Low line (grey dashed) - starts at market open (ib_start_idx)
+            ib_low_line = pg.PlotDataItem(
+                x=[line_start_x, len(bars)],
+                y=[ib.ib_low, ib.ib_low],
                 pen=pg.mkPen('#888888', width=1.5, style=Qt.DashLine)
             )
             self.chart_widget.addItem(ib_low_line)

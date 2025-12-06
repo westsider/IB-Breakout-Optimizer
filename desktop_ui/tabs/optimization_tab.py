@@ -278,6 +278,7 @@ class OptimizationTab(QWidget):
 
         self.equity_chart = QWebEngineView()
         self.equity_chart.setMinimumHeight(120)
+        self.equity_chart.setStyleSheet("background-color: #1e1e1e; border: none;")
         chart_layout.addWidget(self.equity_chart)
 
         right_splitter.addWidget(chart_frame)
@@ -733,8 +734,10 @@ class OptimizationTab(QWidget):
             showlegend=False
         )
 
-        # Render to HTML and display
+        # Render to HTML and display with dark background
         html = fig.to_html(include_plotlyjs='cdn', full_html=True)
+        # Inject dark background style into the HTML
+        html = html.replace('<body>', '<body style="background-color: #1e1e1e; margin: 0; padding: 0;">')
         self.equity_chart.setHtml(html)
 
     def _save_settings(self):
