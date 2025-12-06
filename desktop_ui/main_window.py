@@ -54,6 +54,9 @@ class MainWindow(QMainWindow):
         self._setup_central_widget()
         self._setup_status_bar()
 
+        # Load saved trades after UI is fully initialized
+        self._load_saved_trades()
+
     def _setup_menu_bar(self):
         """Create the menu bar."""
         menubar = self.menuBar()
@@ -139,9 +142,6 @@ class MainWindow(QMainWindow):
 
         # Save tab changes
         self.tabs.currentChanged.connect(self._on_tab_changed)
-
-        # Load saved trades on startup
-        self._load_saved_trades()
 
     def _setup_status_bar(self):
         """Create the status bar."""
