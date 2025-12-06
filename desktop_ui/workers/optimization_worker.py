@@ -101,6 +101,18 @@ class OptimizationWorker(QThread):
 
             self.status_update.emit("Running two-phase optimization (Phase 1: Grid Search)...")
 
+            # Extract filter settings for the optimizer
+            filter_overrides = {}
+            if self.settings.get('gap_filter_enabled'):
+                filter_overrides['gap_filter_enabled'] = True
+                filter_overrides['gap_direction_filter'] = self.settings.get('gap_direction_filter', 'any')
+            if self.settings.get('prior_days_filter_enabled'):
+                filter_overrides['prior_days_filter_enabled'] = True
+                filter_overrides['prior_days_trend'] = self.settings.get('prior_days_trend', 'any')
+            if self.settings.get('daily_range_filter_enabled'):
+                filter_overrides['daily_range_filter_enabled'] = True
+                filter_overrides['min_avg_daily_range_percent'] = self.settings.get('min_avg_daily_range_percent', 0.0)
+
             # For two-phase, use the selected preset for Phase 1
             # Valid presets: quick, standard, full, thorough
             phase1_preset = preset if preset in ['quick', 'standard', 'full', 'thorough'] else 'standard'
@@ -147,7 +159,8 @@ class OptimizationWorker(QThread):
                     phase2_trials=50,
                     top_n_for_phase2=10,
                     progress_callback=two_phase_progress,
-                    status_callback=status_update
+                    status_callback=status_update,
+                    parameter_overrides=filter_overrides if filter_overrides else None
                 )
 
                 # Convert TwoPhaseResults to standard format

@@ -313,6 +313,29 @@ ib_breakout_optimizer/
 | `min_ib_range_percent` | 0.0-2.0 | Minimum IB size |
 | `max_ib_range_percent` | 1.0-10.0 | Maximum IB size |
 
+### Trade Filters (NEW)
+Optimizable filters to improve trade quality:
+
+| Parameter | Options | Description |
+|-----------|---------|-------------|
+| `gap_filter_enabled` | bool | Filter by gap % (today's open vs yesterday's close) |
+| `gap_direction_filter` | any, gap_up_only, gap_down_only, with_trade | Gap direction requirement |
+| `prior_days_filter_enabled` | bool | Filter by prior days trend |
+| `prior_days_trend` | any, bullish, bearish, with_trade | Trend direction requirement |
+| `daily_range_filter_enabled` | bool | Filter by daily range % (volatility) |
+| `min_avg_daily_range_percent` | 0.0-3.0 | Minimum average daily range required |
+
+The `with_trade` option aligns the filter with trade direction:
+- **Gap with_trade**: Long trades allowed on gap-up days, short on gap-down
+- **Trend with_trade**: Long trades allowed when prior days bullish, short when bearish
+
+**Example Results (TSLA 2023-2024):**
+| Configuration | Trades | Profit Factor |
+|--------------|--------|---------------|
+| No filters | 266 | 1.27 |
+| Gap filter (with_trade) | 237 | 1.35 |
+| All filters optimized | 70 | 2.30 |
+
 ## QQQ Filter Explained
 
 The QQQ filter adds confirmation by requiring the QQQ ETF to break its Initial Balance before allowing entries on the primary ticker (e.g., TSLA):
@@ -351,19 +374,19 @@ The backtester is designed to match NinjaTrader results:
 ### Completed Phases
 - [x] Phase 1: Data pipeline and IB calculator
 - [x] Phase 2: Full backtester with advanced exits
-- [x] Phase 3: Optimization engine (Grid, Bayesian, Walk-Forward)
-- [x] Phase 4: Interactive Streamlit UI
+- [x] Phase 3: Optimization engine (Grid, Bayesian, Walk-Forward, Trade Filters)
+- [x] Phase 4: Interactive Desktop & Web UI
+- [x] Phase 5: Continuous learning system (monitoring, regime detection, alerts)
 
 ### Planned Phases
-- [ ] Phase 5: Continuous learning system
-  - Rolling performance monitoring
-  - Regime detection
-  - Automatic re-optimization triggers
-  - Alert notifications
 - [ ] Phase 6: ML trade filter
   - Feature engineering
   - Win/loss prediction model
   - Probability-based filtering
+- [ ] Phase 7: Portfolio View
+  - Multi-ticker optimization
+  - Combined equity curves
+  - Correlation analysis
 
 ## Dependencies
 

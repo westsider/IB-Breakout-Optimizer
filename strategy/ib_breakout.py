@@ -109,6 +109,23 @@ class StrategyParams:
     trade_thursday: bool = True
     trade_friday: bool = True
 
+    # Gap filters (open vs prior day close)
+    gap_filter_enabled: bool = False
+    min_gap_percent: float = -10.0  # Minimum gap % (negative = gap down allowed)
+    max_gap_percent: float = 10.0   # Maximum gap % (positive = gap up allowed)
+    gap_direction_filter: str = "any"  # "any", "gap_up_only", "gap_down_only", "with_trade"
+
+    # Prior days trend filter (last N days close vs open)
+    prior_days_filter_enabled: bool = False
+    prior_days_lookback: int = 3  # Number of prior days to check
+    prior_days_trend: str = "any"  # "any", "bullish", "bearish", "with_trade"
+
+    # Daily range / volatility filter
+    daily_range_filter_enabled: bool = False
+    min_avg_daily_range_percent: float = 0.0  # Minimum average daily range %
+    max_avg_daily_range_percent: float = 100.0  # Maximum average daily range %
+    daily_range_lookback: int = 5  # Days to average for daily range
+
 
 class IBBreakoutStrategy:
     """

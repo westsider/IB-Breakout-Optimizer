@@ -188,6 +188,21 @@ def _mmap_backtest_worker(
     break_even_pct = params.get('break_even_pct', 0.5)
     use_qqq_filter = params.get('use_qqq_filter', False)
 
+    # New filter parameters
+    gap_filter_enabled = params.get('gap_filter_enabled', False)
+    min_gap_percent = params.get('min_gap_percent', -10.0)
+    max_gap_percent = params.get('max_gap_percent', 10.0)
+    gap_direction_filter = params.get('gap_direction_filter', 'any')
+
+    prior_days_filter_enabled = params.get('prior_days_filter_enabled', False)
+    prior_days_lookback = params.get('prior_days_lookback', 3)
+    prior_days_trend = params.get('prior_days_trend', 'any')
+
+    daily_range_filter_enabled = params.get('daily_range_filter_enabled', False)
+    min_avg_daily_range = params.get('min_avg_daily_range_percent', 0.0)
+    max_avg_daily_range = params.get('max_avg_daily_range_percent', 100.0)
+    daily_range_lookback = params.get('daily_range_lookback', 5)
+
     # Parse max_breakout_time (e.g., "14:00" -> hour=14, minute=0)
     max_breakout_str = params.get('max_breakout_time', '14:00')
     max_breakout_parts = max_breakout_str.split(':')
@@ -235,6 +250,78 @@ def _mmap_backtest_worker(
 
     # Calculate IB ranges
     ib_ranges = np.where(ib_lows > 0, (ib_highs - ib_lows) / ib_lows * 100, 0)
+
+    # =========================================================================
+    # DAILY OHLC CALCULATION
+    # Calculate daily Open, High, Low, Close for each date (for filters)
+    # We use Regular Trading Hours (9:30-16:00) for daily OHLC
+    # =========================================================================
+    daily_opens = np.zeros(n_dates)
+    daily_highs = np.zeros(n_dates)
+    daily_lows = np.full(n_dates, np.inf)
+    daily_closes = np.zeros(n_dates)
+    daily_open_set = np.zeros(n_dates, dtype=bool)  # Track if open has been set
+
+    for i in range(n_bars):
+        date_idx = date_indices[i]
+        h = hours[i]
+        m = minutes[i]
+        bar_minutes = h * 60 + m
+
+        # Regular trading hours: 9:30 (570) to 16:00 (960)
+        if bar_minutes >= 570 and bar_minutes <= 960:
+            # Set open on first RTH bar
+            if not daily_open_set[date_idx]:
+                daily_opens[date_idx] = opens[i]
+                daily_open_set[date_idx] = True
+
+            # Track high/low
+            if highs[i] > daily_highs[date_idx]:
+                daily_highs[date_idx] = highs[i]
+            if lows[i] < daily_lows[date_idx]:
+                daily_lows[date_idx] = lows[i]
+
+            # Update close (last RTH bar wins)
+            daily_closes[date_idx] = closes[i]
+
+    # Replace inf with 0 for days with no RTH bars
+    daily_lows[daily_lows == np.inf] = 0
+
+    # =========================================================================
+    # CALCULATE FILTER DATA FOR EACH DAY
+    # - Gap %: (today's open - yesterday's close) / yesterday's close * 100
+    # - Prior days bullish count: how many of last N days closed > opened
+    # - Average daily range: mean of (high - low) / low * 100 for last N days
+    # =========================================================================
+    gap_percent = np.zeros(n_dates)
+    prior_days_bullish_count = np.zeros(n_dates, dtype=np.int32)
+    avg_daily_range = np.zeros(n_dates)
+
+    for d in range(n_dates):
+        # Gap % (need prior day's close)
+        if d > 0 and daily_closes[d - 1] > 0 and daily_opens[d] > 0:
+            gap_percent[d] = (daily_opens[d] - daily_closes[d - 1]) / daily_closes[d - 1] * 100
+
+        # Prior days bullish count
+        bullish_count = 0
+        for lookback in range(1, prior_days_lookback + 1):
+            if d >= lookback:
+                prev_idx = d - lookback
+                if daily_opens[prev_idx] > 0 and daily_closes[prev_idx] > daily_opens[prev_idx]:
+                    bullish_count += 1
+        prior_days_bullish_count[d] = bullish_count
+
+        # Average daily range over lookback period
+        range_sum = 0.0
+        range_count = 0
+        for lookback in range(1, daily_range_lookback + 1):
+            if d >= lookback:
+                prev_idx = d - lookback
+                if daily_lows[prev_idx] > 0:
+                    day_range = (daily_highs[prev_idx] - daily_lows[prev_idx]) / daily_lows[prev_idx] * 100
+                    range_sum += day_range
+                    range_count += 1
+        avg_daily_range[d] = range_sum / range_count if range_count > 0 else 0.0
 
     # =========================================================================
     # QQQ FILTER LOGIC
@@ -389,6 +476,56 @@ def _mmap_backtest_worker(
             found_breakout = True  # Skip this day
             continue
 
+        # =====================================================================
+        # NEW FILTERS - Gap, Prior Days Trend, Daily Range
+        # =====================================================================
+
+        # Gap filter
+        if gap_filter_enabled:
+            day_gap = gap_percent[date_idx]
+
+            # Check gap bounds
+            if day_gap < min_gap_percent or day_gap > max_gap_percent:
+                found_breakout = True  # Skip this day
+                continue
+
+            # Check gap direction filter (applied later when we know trade direction)
+            # For now just note if it's a gap up or gap down
+            is_gap_up = day_gap > 0
+            is_gap_down = day_gap < 0
+
+            if gap_direction_filter == "gap_up_only" and not is_gap_up:
+                found_breakout = True
+                continue
+            elif gap_direction_filter == "gap_down_only" and not is_gap_down:
+                found_breakout = True
+                continue
+            # "with_trade" is handled after we determine trade direction
+
+        # Prior days trend filter
+        if prior_days_filter_enabled:
+            bullish_count = prior_days_bullish_count[date_idx]
+            bearish_count = prior_days_lookback - bullish_count
+
+            # Majority determines trend
+            is_prior_bullish = bullish_count > bearish_count
+            is_prior_bearish = bearish_count > bullish_count
+
+            if prior_days_trend == "bullish" and not is_prior_bullish:
+                found_breakout = True
+                continue
+            elif prior_days_trend == "bearish" and not is_prior_bearish:
+                found_breakout = True
+                continue
+            # "with_trade" is handled after we determine trade direction
+
+        # Daily range filter
+        if daily_range_filter_enabled:
+            day_avg_range = avg_daily_range[date_idx]
+            if day_avg_range < min_avg_daily_range or day_avg_range > max_avg_daily_range:
+                found_breakout = True
+                continue
+
         # Get primary IB levels
         ib_high = ib_highs[date_idx]
         ib_low = ib_lows[date_idx]
@@ -449,6 +586,34 @@ def _mmap_backtest_worker(
                 long_break = False
 
         if long_break or short_break:
+            # Apply "with_trade" filters - gap and trend must align with direction
+            skip_trade = False
+
+            # Gap "with_trade" filter: gap up = long OK, gap down = short OK
+            if gap_filter_enabled and gap_direction_filter == "with_trade":
+                day_gap = gap_percent[date_idx]
+                is_gap_up = day_gap > 0
+                is_gap_down = day_gap < 0
+                if long_break and is_gap_down:
+                    skip_trade = True  # Don't go long on a gap down day
+                elif short_break and is_gap_up:
+                    skip_trade = True  # Don't go short on a gap up day
+
+            # Prior days trend "with_trade" filter: bullish = long OK, bearish = short OK
+            if prior_days_filter_enabled and prior_days_trend == "with_trade" and not skip_trade:
+                bullish_count = prior_days_bullish_count[date_idx]
+                bearish_count = prior_days_lookback - bullish_count
+                is_prior_bullish = bullish_count > bearish_count
+                is_prior_bearish = bearish_count > bullish_count
+                if long_break and is_prior_bearish:
+                    skip_trade = True  # Don't go long after bearish days
+                elif short_break and is_prior_bullish:
+                    skip_trade = True  # Don't go short after bullish days
+
+            if skip_trade:
+                found_breakout = True  # Skip this day but mark as processed
+                continue
+
             found_breakout = True
             entry_indices.append(i)
             entry_prices.append(closes[i])

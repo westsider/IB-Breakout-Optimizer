@@ -316,6 +316,114 @@ class ParameterSpace:
                 enabled=False  # Enable for day-of-week optimization
             ))
 
+        # Gap Filter Parameters
+        self.add_parameter(ParameterConfig(
+            name="gap_filter_enabled",
+            param_type=ParameterType.BOOL,
+            default=False,
+            enabled=False
+        ))
+
+        self.add_parameter(ParameterConfig(
+            name="min_gap_percent",
+            param_type=ParameterType.FLOAT,
+            default=-10.0,
+            min_value=-5.0,
+            max_value=0.0,
+            step=1.0,
+            enabled=False,
+            condition="gap_filter_enabled == True"
+        ))
+
+        self.add_parameter(ParameterConfig(
+            name="max_gap_percent",
+            param_type=ParameterType.FLOAT,
+            default=10.0,
+            min_value=0.0,
+            max_value=5.0,
+            step=1.0,
+            enabled=False,
+            condition="gap_filter_enabled == True"
+        ))
+
+        self.add_parameter(ParameterConfig(
+            name="gap_direction_filter",
+            param_type=ParameterType.CATEGORICAL,
+            default="any",
+            choices=["any", "gap_up_only", "gap_down_only", "with_trade"],
+            enabled=False,
+            condition="gap_filter_enabled == True"
+        ))
+
+        # Prior Days Trend Filter Parameters
+        self.add_parameter(ParameterConfig(
+            name="prior_days_filter_enabled",
+            param_type=ParameterType.BOOL,
+            default=False,
+            enabled=False
+        ))
+
+        self.add_parameter(ParameterConfig(
+            name="prior_days_lookback",
+            param_type=ParameterType.INT,
+            default=3,
+            min_value=1,
+            max_value=5,
+            step=1,
+            enabled=False,
+            condition="prior_days_filter_enabled == True"
+        ))
+
+        self.add_parameter(ParameterConfig(
+            name="prior_days_trend",
+            param_type=ParameterType.CATEGORICAL,
+            default="any",
+            choices=["any", "bullish", "bearish", "with_trade"],
+            enabled=False,
+            condition="prior_days_filter_enabled == True"
+        ))
+
+        # Daily Range / Volatility Filter Parameters
+        self.add_parameter(ParameterConfig(
+            name="daily_range_filter_enabled",
+            param_type=ParameterType.BOOL,
+            default=False,
+            enabled=False
+        ))
+
+        self.add_parameter(ParameterConfig(
+            name="min_avg_daily_range_percent",
+            param_type=ParameterType.FLOAT,
+            default=0.0,
+            min_value=0.0,
+            max_value=3.0,
+            step=0.5,
+            enabled=False,
+            condition="daily_range_filter_enabled == True"
+        ))
+
+        self.add_parameter(ParameterConfig(
+            name="max_avg_daily_range_percent",
+            param_type=ParameterType.FLOAT,
+            default=100.0,
+            min_value=3.0,
+            max_value=10.0,
+            step=1.0,
+            enabled=False,
+            condition="daily_range_filter_enabled == True"
+        ))
+
+        self.add_parameter(ParameterConfig(
+            name="daily_range_lookback",
+            param_type=ParameterType.INT,
+            default=5,
+            min_value=3,
+            max_value=10,
+            step=1,
+            enabled=False,
+            condition="daily_range_filter_enabled == True"
+        ))
+
     def add_parameter(self, config: ParameterConfig):
         """Add a parameter configuration."""
         self.parameters[config.name] = config
@@ -395,6 +503,23 @@ class ParameterSpace:
         # If max_bars_enabled is False, use default for max_bars
         if not result.get("max_bars_enabled", False):
             result["max_bars"] = self.parameters["max_bars"].default
+
+        # If gap_filter_enabled is False, use defaults for gap parameters
+        if not result.get("gap_filter_enabled", False):
+            result["min_gap_percent"] = self.parameters["min_gap_percent"].default
+            result["max_gap_percent"] = self.parameters["max_gap_percent"].default
+            result["gap_direction_filter"] = self.parameters["gap_direction_filter"].default
+
+        # If prior_days_filter_enabled is False, use defaults
+        if not result.get("prior_days_filter_enabled", False):
+            result["prior_days_lookback"] = self.parameters["prior_days_lookback"].default
+            result["prior_days_trend"] = self.parameters["prior_days_trend"].default
+
+        # If daily_range_filter_enabled is False, use defaults
+        if not result.get("daily_range_filter_enabled", False):
+            result["min_avg_daily_range_percent"] = self.parameters["min_avg_daily_range_percent"].default
+            result["max_avg_daily_range_percent"] = self.parameters["max_avg_daily_range_percent"].default
+            result["daily_range_lookback"] = self.parameters["daily_range_lookback"].default
 
         return result
 

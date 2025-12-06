@@ -136,7 +136,8 @@ class TwoPhaseOptimizer:
         top_n_for_phase2: int = 10,
         min_trades: int = 10,
         progress_callback: Optional[Callable] = None,
-        status_callback: Optional[Callable[[str], None]] = None
+        status_callback: Optional[Callable[[str], None]] = None,
+        parameter_overrides: Optional[Dict[str, Any]] = None
     ) -> TwoPhaseResults:
         """
         Run two-phase optimization.
@@ -151,6 +152,7 @@ class TwoPhaseOptimizer:
             min_trades: Minimum trades required
             progress_callback: Optional progress callback for grid search progress
             status_callback: Optional callback for status messages (phase changes)
+            parameter_overrides: Optional dict of parameter overrides (e.g., filter settings)
 
         Returns:
             TwoPhaseResults
@@ -192,6 +194,14 @@ class TwoPhaseOptimizer:
 
         # Run coarse grid search
         phase1_space = create_parameter_space(phase1_preset)
+
+        # Apply parameter overrides (e.g., filter settings from UI)
+        if parameter_overrides:
+            for param_name, value in parameter_overrides.items():
+                if param_name in phase1_space.parameters:
+                    phase1_space.parameters[param_name].enabled = True
+                    phase1_space.parameters[param_name].values = [value]
+
         phase1_results = self.grid_optimizer.optimize(
             parameter_space=phase1_space,
             objective=objective,

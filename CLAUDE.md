@@ -42,6 +42,11 @@ This file provides context and guidance for Claude Code when working with this p
 - IB size analysis
 - Parameter export to NT (JSON + CSV)
 - **QQQ filter fully wired as optimizable parameter**
+- **Trade filters** for improved signal quality:
+  - Gap % filter (today's open vs yesterday's close)
+  - Prior days trend filter (last N days bullish/bearish bias)
+  - Daily range % filter (volatility/ATR filter)
+  - "with_trade" mode aligns filter direction with trade direction
 
 #### Phase 4: Interactive UI (Complete)
 
@@ -284,6 +289,19 @@ Key parameters (all optimizable):
 | `trailing_stop_enabled` | False | Enable trailing stop |
 | `break_even_enabled` | False | Move stop to entry |
 | `max_bars` | 120 | Exit after N bars |
+
+**Trade Filter Parameters** (new):
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `gap_filter_enabled` | False | Filter by gap % |
+| `gap_direction_filter` | "any" | any, gap_up_only, gap_down_only, with_trade |
+| `prior_days_filter_enabled` | False | Filter by prior days trend |
+| `prior_days_trend` | "any" | any, bullish, bearish, with_trade |
+| `prior_days_lookback` | 3 | Days to check for trend |
+| `daily_range_filter_enabled` | False | Filter by daily range % |
+| `min_avg_daily_range_percent` | 0.0 | Minimum avg daily range required |
+| `daily_range_lookback` | 5 | Days to average for range |
 
 ---
 

@@ -121,6 +121,76 @@ class OptimizationTab(QWidget):
 
         layout.addLayout(settings_layout)
 
+        # Trade Filters section
+        filters_layout = QHBoxLayout()
+
+        filters_group = QGroupBox("Trade Filters (optimize these parameters)")
+        filters_grid = QGridLayout(filters_group)
+        filters_grid.setSpacing(8)
+
+        # Gap filter
+        self.gap_filter_check = QCheckBox("Gap %")
+        self.gap_filter_check.setToolTip("Filter trades by gap % (today's open vs yesterday's close)")
+        filters_grid.addWidget(self.gap_filter_check, 0, 0)
+
+        self.gap_direction_combo = QComboBox()
+        self.gap_direction_combo.addItems(["any", "gap_up_only", "gap_down_only", "with_trade"])
+        self.gap_direction_combo.setToolTip(
+            "any: Allow all gaps\n"
+            "gap_up_only: Only trade on gap up days\n"
+            "gap_down_only: Only trade on gap down days\n"
+            "with_trade: Gap must align with trade direction"
+        )
+        self.gap_direction_combo.setEnabled(False)
+        filters_grid.addWidget(self.gap_direction_combo, 0, 1)
+        self.gap_filter_check.stateChanged.connect(
+            lambda state: self.gap_direction_combo.setEnabled(state == Qt.Checked)
+        )
+
+        # Prior days trend filter
+        self.prior_days_filter_check = QCheckBox("Prior Days Trend")
+        self.prior_days_filter_check.setToolTip("Filter trades by prior N days trend (close vs open)")
+        filters_grid.addWidget(self.prior_days_filter_check, 0, 2)
+
+        self.prior_days_trend_combo = QComboBox()
+        self.prior_days_trend_combo.addItems(["any", "bullish", "bearish", "with_trade"])
+        self.prior_days_trend_combo.setToolTip(
+            "any: Allow all trends\n"
+            "bullish: Prior days mostly bullish (close > open)\n"
+            "bearish: Prior days mostly bearish (close < open)\n"
+            "with_trade: Trend must align with trade direction"
+        )
+        self.prior_days_trend_combo.setEnabled(False)
+        filters_grid.addWidget(self.prior_days_trend_combo, 0, 3)
+        self.prior_days_filter_check.stateChanged.connect(
+            lambda state: self.prior_days_trend_combo.setEnabled(state == Qt.Checked)
+        )
+
+        # Daily range filter
+        self.daily_range_filter_check = QCheckBox("Daily Range %")
+        self.daily_range_filter_check.setToolTip("Filter trades by average daily range % (volatility)")
+        filters_grid.addWidget(self.daily_range_filter_check, 0, 4)
+
+        self.min_daily_range_combo = QComboBox()
+        self.min_daily_range_combo.addItems(["0.0", "0.5", "1.0", "1.5", "2.0", "2.5", "3.0"])
+        self.min_daily_range_combo.setToolTip("Minimum average daily range % required")
+        self.min_daily_range_combo.setEnabled(False)
+        filters_grid.addWidget(self.min_daily_range_combo, 0, 5)
+        self.daily_range_filter_check.stateChanged.connect(
+            lambda state: self.min_daily_range_combo.setEnabled(state == Qt.Checked)
+        )
+
+        # Connect filter changes to save settings
+        self.gap_filter_check.stateChanged.connect(self._save_settings)
+        self.gap_direction_combo.currentTextChanged.connect(self._save_settings)
+        self.prior_days_filter_check.stateChanged.connect(self._save_settings)
+        self.prior_days_trend_combo.currentTextChanged.connect(self._save_settings)
+        self.daily_range_filter_check.stateChanged.connect(self._save_settings)
+        self.min_daily_range_combo.currentTextChanged.connect(self._save_settings)
+
+        filters_layout.addWidget(filters_group)
+        layout.addLayout(filters_layout)
+
         # Run button and progress section - compact layout
         run_frame = QFrame()
         run_frame.setStyleSheet("""
@@ -419,6 +489,13 @@ class OptimizationTab(QWidget):
             'objective': self.objective_combo.currentText(),
             'preset': preset_name,
             'mode': 'two_phase',  # Always use two-phase (Grid + Bayesian)
+            # Trade filter settings
+            'gap_filter_enabled': self.gap_filter_check.isChecked(),
+            'gap_direction_filter': self.gap_direction_combo.currentText() if self.gap_filter_check.isChecked() else 'any',
+            'prior_days_filter_enabled': self.prior_days_filter_check.isChecked(),
+            'prior_days_trend': self.prior_days_trend_combo.currentText() if self.prior_days_filter_check.isChecked() else 'any',
+            'daily_range_filter_enabled': self.daily_range_filter_check.isChecked(),
+            'min_avg_daily_range_percent': float(self.min_daily_range_combo.currentText()) if self.daily_range_filter_check.isChecked() else 0.0,
         }
 
         # Start worker
@@ -749,6 +826,14 @@ class OptimizationTab(QWidget):
         preset_name = self.preset_combo.currentText().split(" ")[0]
         self.settings.setValue("opt/preset", preset_name)
 
+        # Save filter settings
+        self.settings.setValue("opt/gap_filter", self.gap_filter_check.isChecked())
+        self.settings.setValue("opt/gap_direction", self.gap_direction_combo.currentText())
+        self.settings.setValue("opt/prior_days_filter", self.prior_days_filter_check.isChecked())
+        self.settings.setValue("opt/prior_days_trend", self.prior_days_trend_combo.currentText())
+        self.settings.setValue("opt/daily_range_filter", self.daily_range_filter_check.isChecked())
+        self.settings.setValue("opt/min_daily_range", self.min_daily_range_combo.currentText())
+
     def _load_settings(self):
         """Load saved settings from QSettings."""
         # Ticker
@@ -774,6 +859,31 @@ class OptimizationTab(QWidget):
                 self.preset_combo.setCurrentIndex(i)
                 break
         self._update_preset_info(self.preset_combo.currentText())
+
+        # Load filter settings
+        gap_filter = self.settings.value("opt/gap_filter", False, type=bool)
+        self.gap_filter_check.setChecked(gap_filter)
+        self.gap_direction_combo.setEnabled(gap_filter)
+        gap_direction = self.settings.value("opt/gap_direction", "any")
+        idx = self.gap_direction_combo.findText(gap_direction)
+        if idx >= 0:
+            self.gap_direction_combo.setCurrentIndex(idx)
+
+        prior_days_filter = self.settings.value("opt/prior_days_filter", False, type=bool)
+        self.prior_days_filter_check.setChecked(prior_days_filter)
+        self.prior_days_trend_combo.setEnabled(prior_days_filter)
+        prior_days_trend = self.settings.value("opt/prior_days_trend", "any")
+        idx = self.prior_days_trend_combo.findText(prior_days_trend)
+        if idx >= 0:
+            self.prior_days_trend_combo.setCurrentIndex(idx)
+
+        daily_range_filter = self.settings.value("opt/daily_range_filter", False, type=bool)
+        self.daily_range_filter_check.setChecked(daily_range_filter)
+        self.min_daily_range_combo.setEnabled(daily_range_filter)
+        min_daily_range = self.settings.value("opt/min_daily_range", "0.0")
+        idx = self.min_daily_range_combo.findText(min_daily_range)
+        if idx >= 0:
+            self.min_daily_range_combo.setCurrentIndex(idx)
 
     def _save_persisted_results(self, results: dict):
         """Save optimization results to disk for persistence across launches."""
