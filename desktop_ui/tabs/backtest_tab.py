@@ -17,7 +17,7 @@ from PySide6.QtGui import QColor
 
 from desktop_ui.workers.backtest_worker import BacktestWorker
 from desktop_ui.widgets.metrics_panel import MetricsPanel
-from data.data_types import Trade, TradeDirection, ExitReason
+from data.data_types import Trade, TradeDirection, ExitReason, InitialBalance
 
 
 class BacktestTab(QWidget):
@@ -432,6 +432,16 @@ class BacktestTab(QWidget):
                 'mfe': trade.mfe,
                 'bars_held': trade.bars_held
             }
+            # Save IB data if available
+            if trade.ib:
+                trade_dict['ib'] = {
+                    'ib_high': trade.ib.ib_high,
+                    'ib_low': trade.ib.ib_low,
+                    'session_start': trade.ib.session_start.isoformat() if trade.ib.session_start else None,
+                    'ib_end_time': trade.ib.ib_end_time.isoformat() if trade.ib.ib_end_time else None,
+                    'ib_range': trade.ib.ib_range,
+                    'ib_range_pct': trade.ib.ib_range_pct
+                }
             trades_data.append(trade_dict)
 
         # Save to file
@@ -472,6 +482,23 @@ class BacktestTab(QWidget):
                 if td.get('direction') == 'short':
                     direction = TradeDirection.SHORT
 
+                # Parse IB data if available
+                ib = None
+                if td.get('ib'):
+                    ib_data = td['ib']
+                    entry_time = datetime.fromisoformat(td['entry_time']) if td.get('entry_time') else None
+                    ib = InitialBalance(
+                        date=entry_time.date() if entry_time else None,
+                        ticker=td.get('ticker', ''),
+                        session_start=datetime.fromisoformat(ib_data['session_start']) if ib_data.get('session_start') else None,
+                        ib_end_time=datetime.fromisoformat(ib_data['ib_end_time']) if ib_data.get('ib_end_time') else None,
+                        ib_high=ib_data.get('ib_high', 0),
+                        ib_low=ib_data.get('ib_low', float('inf')),
+                        ib_range=ib_data.get('ib_range', 0),
+                        ib_range_pct=ib_data.get('ib_range_pct', 0),
+                        is_calculated=True
+                    )
+
                 trade = Trade(
                     trade_id=td.get('trade_id', ''),
                     ticker=td.get('ticker', ''),
@@ -485,6 +512,7 @@ class BacktestTab(QWidget):
                     pnl_pct=td.get('pnl_pct', 0),
                     commission=td.get('commission', 0),
                     exit_reason=exit_reason,
+                    ib=ib,
                     mae=td.get('mae', 0),
                     mfe=td.get('mfe', 0),
                     bars_held=td.get('bars_held', 0)

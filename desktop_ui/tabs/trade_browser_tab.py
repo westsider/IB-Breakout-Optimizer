@@ -431,6 +431,77 @@ class TradeBrowserTab(QWidget):
         y_min = min(all_lows) * 0.999
         y_max = max(all_highs) * 1.001
 
+        # Draw IB High/Low lines and IB period if available
+        if trade.ib and trade.ib.ib_high > 0 and trade.ib.ib_low < float('inf'):
+            ib = trade.ib
+
+            # Find IB period bar indices
+            ib_start_idx = None
+            ib_end_idx = None
+
+            if ib.session_start and ib.ib_end_time:
+                for bar in bars:
+                    if ib_start_idx is None and bar['timestamp'] >= ib.session_start:
+                        ib_start_idx = bar['index']
+                    if ib_end_idx is None and bar['timestamp'] >= ib.ib_end_time:
+                        ib_end_idx = bar['index']
+                        break
+
+            # Default to start of day if not found
+            if ib_start_idx is None:
+                ib_start_idx = 0
+            if ib_end_idx is None and bars:
+                # Assume 30-min IB (about 30 bars for 1-min data)
+                ib_end_idx = min(30, len(bars) - 1)
+
+            # IB High line (white dashed)
+            self.chart_widget.addLine(
+                y=ib.ib_high,
+                pen=pg.mkPen('#ffffff', width=1, style=Qt.DashLine)
+            )
+            # IB High label
+            ib_high_text = pg.TextItem(
+                f"IB High: ${ib.ib_high:.2f}",
+                color='#ffffff', anchor=(0, 0.5)
+            )
+            ib_high_text.setPos(len(bars) - 1, ib.ib_high)
+            self.chart_widget.addItem(ib_high_text)
+
+            # IB Low line (white dashed)
+            self.chart_widget.addLine(
+                y=ib.ib_low,
+                pen=pg.mkPen('#ffffff', width=1, style=Qt.DashLine)
+            )
+            # IB Low label
+            ib_low_text = pg.TextItem(
+                f"IB Low: ${ib.ib_low:.2f}",
+                color='#ffffff', anchor=(0, 0.5)
+            )
+            ib_low_text.setPos(len(bars) - 1, ib.ib_low)
+            self.chart_widget.addItem(ib_low_text)
+
+            # Shade the IB period (light blue/cyan)
+            ib_region = pg.LinearRegionItem(
+                values=[ib_start_idx, ib_end_idx],
+                orientation='vertical',
+                brush=pg.mkBrush('#00ffff15'),  # Very light cyan
+                pen=pg.mkPen('#00ffff', width=1, style=Qt.DotLine),
+                movable=False
+            )
+            self.chart_widget.addItem(ib_region)
+
+            # IB period label
+            ib_period_text = pg.TextItem(
+                "IB",
+                color='#00ffff', anchor=(0.5, 1)
+            )
+            ib_period_text.setPos((ib_start_idx + ib_end_idx) / 2, y_max)
+            self.chart_widget.addItem(ib_period_text)
+
+            # Include IB levels in y-axis range
+            y_min = min(y_min, ib.ib_low * 0.999)
+            y_max = max(y_max, ib.ib_high * 1.001)
+
         # Draw entry marker
         if entry_idx is not None:
             entry_color = '#00ff00' if trade.direction.value == 'long' else '#ff4444'
