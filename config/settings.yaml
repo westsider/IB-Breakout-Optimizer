@@ -1,0 +1,51 @@
+# IB Breakout Optimizer - Global Configuration
+
+# Data Settings
+data:
+  cache_dir: "C:/Users/Warren/Projects/ib_breakout_optimizer/output/cache"
+  raw_data_dir: "C:/Users/Warren/Downloads"
+  polygon_api_key: "ozy1q3Aj1rMRu333da1dVb_syktNSXow"
+  timezone: "America/New_York"
+
+# Default Strategy Parameters (matching NinjaTrader defaults)
+strategy:
+  ib_duration_minutes: 30
+  profit_target_percent: 0.5
+  stop_loss_type: "opposite_ib"  # "opposite_ib" or "match_target"
+  ib_proximity_percent: 0
+  trade_direction: "both"  # "both", "long_only", "short_only"
+  fixed_share_size: 100
+  dollar_amount: 0
+  trading_start_time: "09:00"
+  trading_end_time: "15:00"
+
+# Filter Parameters
+filters:
+  use_qqq_filter: false
+  min_ib_range_percent: 0.0
+  max_ib_range_percent: 10.0
+  max_breakout_time: "14:00"
+  trade_days:
+    monday: true
+    tuesday: true
+    wednesday: true
+    thursday: true
+    friday: true
+
+# Session Settings
+session:
+  market_open: "09:30"
+  market_close: "16:00"
+  premarket_start: "04:00"
+  afterhours_end: "20:00"
+
+# Backtester Settings
+backtester:
+  initial_capital: 100000
+  commission_per_share: 0.0
+  slippage_per_share: 0.0
+
+# Output Settings
+output:
+  results_dir: "C:/Users/Warren/Projects/ib_breakout_optimizer/output/results"
+  reports_dir: "C:/Users/Warren/Projects/ib_breakout_optimizer/output/reports"

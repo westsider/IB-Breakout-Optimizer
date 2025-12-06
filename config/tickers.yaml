@@ -1,0 +1,48 @@
+# Ticker-Specific Configuration
+
+tickers:
+  TSLA:
+    enabled: true
+    data_file: "TSLA_1min_NT.txt"  # NinjaTrader format file
+    min_price: 100
+    max_price: 500
+    tick_size: 0.01
+    lot_size: 100
+
+  QQQ:
+    enabled: true
+    data_file: "QQQ_1min_NT.txt"
+    min_price: 200
+    max_price: 600
+    tick_size: 0.01
+    lot_size: 100
+
+  AAPL:
+    enabled: false
+    data_file: "AAPL_1min_NT.txt"
+    min_price: 100
+    max_price: 300
+    tick_size: 0.01
+    lot_size: 100
+
+  NVDA:
+    enabled: false
+    data_file: "NVDA_1min_NT.txt"
+    min_price: 200
+    max_price: 1000
+    tick_size: 0.01
+    lot_size: 100
+
+  MSFT:
+    enabled: false
+    data_file: "MSFT_1min_NT.txt"
+    min_price: 200
+    max_price: 500
+    tick_size: 0.01
+    lot_size: 100
+
+# Portfolio-level constraints
+portfolio:
+  max_trades_per_day_per_ticker: 1
+  max_trades_per_day_total: 3
+  max_positions_simultaneous: 1

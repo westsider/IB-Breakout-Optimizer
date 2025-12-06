@@ -1,0 +1,201 @@
+# Optimization Parameter Space for Optuna/Grid Search
+
+# Entry Parameters
+entry:
+  ib_duration_minutes:
+    type: int
+    range: [15, 60]
+    step: 5
+    default: 30
+
+  entry_mode:
+    type: categorical
+    values: ["close_break", "intrabar"]
+    default: "close_break"
+
+  early_entry_enabled:
+    type: bool
+    default: false
+
+  early_entry_pct_of_ib:
+    type: float
+    range: [0.02, 0.30]
+    step: 0.02
+    default: 0.10
+    condition: early_entry_enabled == true
+
+  entry_time_start:
+    type: time
+    range: ["09:35", "12:00"]
+    step_minutes: 15
+    default: "09:00"
+
+  entry_time_end:
+    type: time
+    range: ["10:00", "15:30"]
+    step_minutes: 30
+    default: "15:00"
+
+  allow_short:
+    type: bool
+    default: true
+
+# Exit Parameters
+exit:
+  target_mode:
+    type: categorical
+    values: ["ib_multiple", "percent", "atr"]
+    default: "percent"
+
+  target_multiplier_ib:
+    type: float
+    range: [0.5, 3.0]
+    step: 0.25
+    default: 1.0
+    condition: target_mode == "ib_multiple"
+
+  target_percent:
+    type: float
+    range: [0.3, 2.0]
+    step: 0.1
+    default: 0.5
+    condition: target_mode == "percent"
+
+  initial_stop_mode:
+    type: categorical
+    values: ["opposite_ib", "atr", "percent", "match_target"]
+    default: "opposite_ib"
+
+  initial_stop_atr_mult:
+    type: float
+    range: [0.5, 3.0]
+    step: 0.25
+    default: 1.5
+    condition: initial_stop_mode == "atr"
+
+  trailing_stop_enabled:
+    type: bool
+    default: false
+
+  trailing_stop_atr_mult:
+    type: float
+    range: [0.5, 4.0]
+    step: 0.5
+    default: 2.0
+    condition: trailing_stop_enabled == true
+
+  break_even_enabled:
+    type: bool
+    default: false
+
+  break_even_pct:
+    type: float
+    range: [0.5, 0.9]
+    step: 0.1
+    default: 0.7
+    condition: break_even_enabled == true
+
+  max_bars:
+    type: int
+    range: [5, 120]
+    step: 5
+    default: 60
+
+  eod_exit_time:
+    type: time
+    range: ["15:30", "15:55"]
+    step_minutes: 5
+    default: "15:55"
+
+# Filter Parameters
+filters:
+  qqq_filter_enabled:
+    type: bool
+    default: false
+
+  qqq_window_minutes:
+    type: int
+    range: [0, 30]
+    step: 5
+    default: 0
+    condition: qqq_filter_enabled == true
+
+  min_ib_range_pct:
+    type: float
+    range: [0.0, 1.0]
+    step: 0.1
+    default: 0.0
+
+  max_ib_range_pct:
+    type: float
+    range: [1.0, 5.0]
+    step: 0.5
+    default: 10.0
+
+  ib_range_norm_method:
+    type: categorical
+    values: ["percent", "atr", "prev_day"]
+    default: "percent"
+
+  day_of_week_filter:
+    type: multi_categorical
+    values: ["monday", "tuesday", "wednesday", "thursday", "friday"]
+    default: ["monday", "tuesday", "wednesday", "thursday", "friday"]
+
+  volume_confirmation:
+    type: bool
+    default: false
+
+# Portfolio Parameters
+portfolio:
+  max_trades_per_day_ticker:
+    type: int
+    range: [1, 3]
+    default: 1
+
+  max_trades_per_day_total:
+    type: int
+    range: [1, 5]
+    default: 3
+
+  position_size_mode:
+    type: categorical
+    values: ["fixed", "percent_equity", "risk_based"]
+    default: "fixed"
+
+  risk_per_trade_pct:
+    type: float
+    range: [0.5, 2.0]
+    step: 0.25
+    default: 1.0
+    condition: position_size_mode == "risk_based"
+
+# IB Size Buckets for Analysis
+ib_size_analysis:
+  enabled: true
+  bucket_method: "percentile"  # "percentile" or "fixed"
+  # Percentile-based buckets
+  percentile_buckets:
+    small: [0, 33]
+    medium: [33, 66]
+    large: [66, 100]
+  # Fixed percentage buckets (alternative)
+  fixed_buckets:
+    small: [0, 0.5]
+    medium: [0.5, 1.0]
+    large: [1.0, 999]
+
+# Optimization Settings
+optimization:
+  objective: "sharpe_ratio"  # "sharpe_ratio", "profit_factor", "total_profit", "calmar_ratio"
+  n_trials: 500  # For Bayesian optimization
+  timeout_seconds: 3600
+  n_jobs: -1  # Parallel jobs (-1 = all CPUs)
+
+  # Walk-forward settings
+  walk_forward:
+    enabled: true
+    in_sample_days: 180
+    out_sample_days: 30
+    anchored: false  # true = expanding window, false = rolling
+    min_trades_per_period: 20
