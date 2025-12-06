@@ -134,7 +134,8 @@ def calculate_metrics_from_trades(trades: List) -> Dict:
         }
 
     pnls = [t.pnl for t in trades]
-    winners = [p for p in pnls if p >= 0]
+    # Match PerformanceMetrics: winning = pnl > 0, losing = pnl < 0, even = pnl == 0
+    winners = [p for p in pnls if p > 0]
     losers = [p for p in pnls if p < 0]
 
     total_pnl = sum(pnls)

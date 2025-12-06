@@ -214,14 +214,14 @@ def _mmap_backtest_worker(
         h = hours[i]
         m = minutes[i]
 
-        # Check if in IB window (9:30 to IB end)
-        in_ib = False
-        if h == 9 and m >= 30:
-            in_ib = True
-        elif h == ib_end_hour and m < ib_end_minute:
-            in_ib = True
-        elif h > 9 and h < ib_end_hour:
-            in_ib = True
+        # Check if in IB window (9:30 to IB end time, exclusive)
+        # IB window: bar_time >= 9:30 AND bar_time < ib_end_time
+        # Convert to minutes from midnight for easy comparison
+        bar_minutes = h * 60 + m
+        session_start_minutes = 9 * 60 + 30  # 9:30 = 570 minutes
+        ib_end_minutes = ib_end_total_minutes  # Already calculated above
+
+        in_ib = (bar_minutes >= session_start_minutes and bar_minutes < ib_end_minutes)
 
         if in_ib:
             date_idx = date_indices[i]
@@ -272,13 +272,12 @@ def _mmap_backtest_worker(
             m = f_minutes[i]
 
             # Check if in IB window (same logic as primary)
-            in_ib = False
-            if h == 9 and m >= 30:
-                in_ib = True
-            elif h == ib_end_hour and m < ib_end_minute:
-                in_ib = True
-            elif h > 9 and h < ib_end_hour:
-                in_ib = True
+            # IB window: bar_time >= 9:30 AND bar_time < ib_end_time
+            bar_minutes = h * 60 + m
+            session_start_minutes = 9 * 60 + 30  # 9:30 = 570 minutes
+            ib_end_minutes = ib_end_total_minutes
+
+            in_ib = (bar_minutes >= session_start_minutes and bar_minutes < ib_end_minutes)
 
             if in_ib:
                 f_date_idx = f_date_indices[i]
@@ -558,22 +557,44 @@ def _mmap_backtest_worker(
                             current_stop = entry_price
                         break_even_triggered = True
 
+            # Exit logic matching BacktestRunner's ExitManager
+            # Uses realistic fill prices that account for gaps/slippage
             if long:
                 if highs[j] >= target:
-                    exit_price = target
+                    # Target hit - use target price or open if gapped through
+                    # For long target: min(open, target) if open <= target, else target
+                    if opens[j] <= target:
+                        exit_price = min(opens[j], target)
+                    else:
+                        exit_price = target
                     exit_reason = 'target'
                     break
                 elif lows[j] <= current_stop:
-                    exit_price = current_stop
+                    # Stop hit - use stop price or open if gapped through
+                    # For long stop: max(open, stop) if open >= stop, else open
+                    if opens[j] >= current_stop:
+                        exit_price = max(opens[j], current_stop)
+                    else:
+                        exit_price = opens[j]  # Gapped through stop
                     exit_reason = 'trailing_stop' if trailing_stop_enabled else ('break_even' if break_even_triggered else 'stop')
                     break
             else:
                 if lows[j] <= target:
-                    exit_price = target
+                    # Short target hit - use target price or open if gapped through
+                    # For short target: max(open, target) if open >= target, else target
+                    if opens[j] >= target:
+                        exit_price = max(opens[j], target)
+                    else:
+                        exit_price = target
                     exit_reason = 'target'
                     break
                 elif highs[j] >= current_stop:
-                    exit_price = current_stop
+                    # Short stop hit - use stop price or open if gapped through
+                    # For short stop: min(open, stop) if open <= stop, else open
+                    if opens[j] <= current_stop:
+                        exit_price = min(opens[j], current_stop)
+                    else:
+                        exit_price = opens[j]  # Gapped through stop
                     exit_reason = 'trailing_stop' if trailing_stop_enabled else ('break_even' if break_even_triggered else 'stop')
                     break
 
