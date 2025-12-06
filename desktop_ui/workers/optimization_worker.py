@@ -266,11 +266,9 @@ class OptimizationWorker(QThread):
                 pf = r.metrics.profit_factor
                 trade_pnls = []
 
-            top_results.append({
-                'trade_direction': r.params.get('trade_direction', ''),
-                'profit_target_percent': r.params.get('profit_target_percent', 0),
-                'stop_loss_type': r.params.get('stop_loss_type', ''),
-                'use_qqq_filter': r.params.get('use_qqq_filter', False),
+            # Include ALL params from the optimization result
+            result_dict = dict(r.params)  # Start with all params
+            result_dict.update({
                 'objective_value': r.objective_value,
                 'profit_factor': pf or 0,
                 'total_trades': trades or 0,
@@ -278,6 +276,7 @@ class OptimizationWorker(QThread):
                 'total_pnl': pnl or 0,
                 'trade_pnls': trade_pnls  # Individual trade P&Ls for equity curve
             })
+            top_results.append(result_dict)
 
         # Get best result metrics
         best = results.best_result
@@ -503,16 +502,14 @@ class OptimizationWorker(QThread):
 
             results = []
             for _, row in top_10.iterrows():
-                results.append({
-                    'trade_direction': row.get('trade_direction', ''),
-                    'profit_target_percent': row.get('profit_target_percent', 0),
-                    'stop_loss_type': row.get('stop_loss_type', ''),
-                    'use_qqq_filter': row.get('use_qqq_filter', False),
-                    'objective_value': row.get(objective, 0),
-                    'total_trades': int(row.get('total_trades', 0)),
-                    'win_rate': row.get('win_rate', 0),
-                    'total_pnl': row.get('total_net_profit', 0)
-                })
+                # Include ALL columns from the CSV as params
+                result_dict = row.to_dict()
+                # Ensure objective_value is set
+                result_dict['objective_value'] = row.get(objective, 0)
+                # Map total_net_profit to total_pnl for consistency
+                if 'total_net_profit' in result_dict:
+                    result_dict['total_pnl'] = result_dict['total_net_profit']
+                results.append(result_dict)
 
             return results
 
@@ -557,11 +554,9 @@ class OptimizationWorker(QThread):
         for r in results.phase1_results.get_top_n(10):
             m = get_metrics(r)
             trade_pnls = getattr(r, 'trade_pnls', [])
-            top_results.append({
-                'trade_direction': r.params.get('trade_direction', ''),
-                'profit_target_percent': r.params.get('profit_target_percent', 0),
-                'stop_loss_type': r.params.get('stop_loss_type', ''),
-                'use_qqq_filter': r.params.get('use_qqq_filter', False),
+            # Include ALL params from the optimization result
+            result_dict = dict(r.params)
+            result_dict.update({
                 'objective_value': r.objective_value,
                 'profit_factor': m['profit_factor'],
                 'total_trades': m['total_trades'],
@@ -569,6 +564,7 @@ class OptimizationWorker(QThread):
                 'total_pnl': m['total_pnl'],
                 'trade_pnls': trade_pnls
             })
+            top_results.append(result_dict)
 
         # Get best result metrics
         best_metrics = get_metrics(results.best_result) if results.best_result else {}

@@ -344,13 +344,14 @@ class BacktestTab(QWidget):
 
     def load_params_from_json(self, params: dict):
         """Load parameters from optimization results."""
+        # Basic parameters
         if 'trade_direction' in params:
             idx = self.direction_combo.findText(params['trade_direction'])
             if idx >= 0:
                 self.direction_combo.setCurrentIndex(idx)
 
         if 'profit_target_percent' in params:
-            self.profit_target_spin.setValue(params['profit_target_percent'])
+            self.profit_target_spin.setValue(float(params['profit_target_percent']))
 
         if 'stop_loss_type' in params:
             idx = self.stop_loss_combo.findText(params['stop_loss_type'])
@@ -358,33 +359,50 @@ class BacktestTab(QWidget):
                 self.stop_loss_combo.setCurrentIndex(idx)
 
         if 'ib_duration_minutes' in params:
-            idx = self.ib_duration_combo.findText(str(params['ib_duration_minutes']))
+            idx = self.ib_duration_combo.findText(str(int(params['ib_duration_minutes'])))
             if idx >= 0:
                 self.ib_duration_combo.setCurrentIndex(idx)
 
+        # Filters
         if 'use_qqq_filter' in params:
-            self.qqq_filter_check.setChecked(params['use_qqq_filter'])
+            self.qqq_filter_check.setChecked(bool(params['use_qqq_filter']))
 
         if 'min_ib_range_percent' in params:
-            self.min_ib_spin.setValue(params['min_ib_range_percent'])
+            self.min_ib_spin.setValue(float(params['min_ib_range_percent']))
 
         if 'max_ib_range_percent' in params:
-            self.max_ib_spin.setValue(params['max_ib_range_percent'])
+            self.max_ib_spin.setValue(float(params['max_ib_range_percent']))
 
+        if 'max_breakout_time' in params:
+            idx = self.max_breakout_combo.findText(str(params['max_breakout_time']))
+            if idx >= 0:
+                self.max_breakout_combo.setCurrentIndex(idx)
+
+        if 'eod_exit_time' in params:
+            idx = self.eod_exit_combo.findText(str(params['eod_exit_time']))
+            if idx >= 0:
+                self.eod_exit_combo.setCurrentIndex(idx)
+
+        # Advanced exits - trailing stop
         if 'trailing_stop_enabled' in params:
-            self.trailing_check.setChecked(params['trailing_stop_enabled'])
-            if params['trailing_stop_enabled'] and 'trailing_stop_atr_mult' in params:
-                self.trailing_atr_spin.setValue(params['trailing_stop_atr_mult'])
+            enabled = bool(params['trailing_stop_enabled'])
+            self.trailing_check.setChecked(enabled)
+            if 'trailing_stop_atr_mult' in params:
+                self.trailing_atr_spin.setValue(float(params['trailing_stop_atr_mult']))
 
+        # Advanced exits - break-even stop
         if 'break_even_enabled' in params:
-            self.breakeven_check.setChecked(params['break_even_enabled'])
-            if params['break_even_enabled'] and 'break_even_pct' in params:
-                self.breakeven_pct_spin.setValue(params['break_even_pct'])
+            enabled = bool(params['break_even_enabled'])
+            self.breakeven_check.setChecked(enabled)
+            if 'break_even_pct' in params:
+                self.breakeven_pct_spin.setValue(float(params['break_even_pct']))
 
+        # Advanced exits - max bars
         if 'max_bars_enabled' in params:
-            self.maxbars_check.setChecked(params['max_bars_enabled'])
-            if params['max_bars_enabled'] and 'max_bars' in params:
-                self.maxbars_spin.setValue(params['max_bars'])
+            enabled = bool(params['max_bars_enabled'])
+            self.maxbars_check.setChecked(enabled)
+            if 'max_bars' in params:
+                self.maxbars_spin.setValue(int(params['max_bars']))
 
     def _get_trades_file_path(self) -> Path:
         """Get path to saved trades file."""
