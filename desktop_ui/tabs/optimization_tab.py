@@ -67,7 +67,7 @@ class OptimizationTab(QWidget):
         self.objective_combo = QComboBox()
         self.objective_combo.addItems([
             "profit_factor", "sharpe_ratio", "sortino_ratio",
-            "total_profit", "calmar_ratio", "win_rate"
+            "total_profit", "calmar_ratio", "win_rate", "k_ratio"
         ])
         data_layout.addWidget(self.objective_combo, 2, 1)
 

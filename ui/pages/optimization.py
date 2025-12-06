@@ -54,7 +54,7 @@ def render_optimization_page():
 
         objective = st.selectbox(
             "Objective Function",
-            ["sharpe_ratio", "sortino_ratio", "profit_factor",
+            ["sharpe_ratio", "sortino_ratio", "profit_factor", "k_ratio",
              "total_profit", "calmar_ratio", "win_rate"],
             index=0
         )

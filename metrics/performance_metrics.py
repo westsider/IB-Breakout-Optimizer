@@ -87,6 +87,7 @@ class PerformanceMetrics:
     calmar_ratio: float = 0.0
     ulcer_index: float = 0.0
     r_squared: float = 0.0
+    k_ratio: float = 0.0
 
     # Recovery metrics
     max_time_to_recover_days: float = 0.0
@@ -122,6 +123,7 @@ class PerformanceMetrics:
                 'Sortino ratio': f"{self.sortino_ratio:.2f}",
                 'Ulcer index': f"{self.ulcer_index:.2f}",
                 'R squared': f"{self.r_squared:.2f}",
+                'K-Ratio': f"{self.k_ratio:.2f}",
             },
             'Trades': {
                 'Total # of trades': self.total_trades,
@@ -314,6 +316,7 @@ def calculate_metrics(trades: List[Trade], initial_capital: float = 100000.0) ->
     metrics.calmar_ratio = _calculate_calmar(metrics.total_net_profit, metrics.max_drawdown, metrics.start_date, metrics.end_date)
     metrics.ulcer_index = _calculate_ulcer_index(trades, initial_capital)
     metrics.r_squared = _calculate_r_squared(trades)
+    metrics.k_ratio = _calculate_k_ratio(trades)
 
     # MAE/MFE
     mae_values = [t.mae for t in trades if t.mae > 0]
@@ -528,6 +531,90 @@ def _calculate_r_squared(trades: List[Trade]) -> float:
     r_squared = correlation ** 2
 
     return r_squared
+
+
+def _calculate_k_ratio(trades: List[Trade]) -> float:
+    """
+    Calculate K-Ratio (Kestner Ratio).
+
+    Measures consistency of returns. K-Ratio >= 1.0 indicates consistent growth.
+    Higher is better - the more consistent the equity curve, the higher the K-Ratio.
+
+    Formula: K-Ratio = (Slope of equity regression) / (Standard Error of slope)
+
+    From: Stocks & Commodities V14:3 (115-118): "Measuring System Performance"
+    by Lars N. Kestner
+
+    The K-Ratio rewards:
+    - Steady, consistent returns (high slope, low variance around regression line)
+    - Linear equity growth over time
+
+    It penalizes:
+    - Volatile equity curves (high standard error)
+    - Large drawdowns followed by recoveries
+    - Inconsistent returns even if total profit is high
+    """
+    if len(trades) < 3:
+        return 0.0
+
+    # Build cumulative P&L (equity curve)
+    cum_pnl = []
+    total = 0
+    for trade in sorted(trades, key=lambda t: t.exit_time or datetime.min):
+        total += trade.pnl
+        cum_pnl.append(total)
+
+    n = len(cum_pnl)
+    if n < 3:
+        return 0.0
+
+    # Bar numbers (x values): 1, 2, 3, ..., n
+    x = np.arange(1, n + 1, dtype=np.float64)
+    y = np.array(cum_pnl, dtype=np.float64)
+
+    # Calculate linear regression: y = slope * x + intercept
+    x_mean = x.mean()
+    y_mean = y.mean()
+
+    # Sum of squared deviations
+    ss_xx = np.sum((x - x_mean) ** 2)
+    ss_xy = np.sum((x - x_mean) * (y - y_mean))
+
+    if ss_xx == 0:
+        return 0.0
+
+    # Slope of regression line
+    slope = ss_xy / ss_xx
+
+    # Predicted values
+    y_pred = slope * x + (y_mean - slope * x_mean)
+
+    # Residuals
+    residuals = y - y_pred
+
+    # Standard error of the slope
+    # SE(slope) = sqrt(sum(residuals^2) / (n-2)) / sqrt(sum((x - x_mean)^2))
+    ss_residuals = np.sum(residuals ** 2)
+
+    if n <= 2:
+        return 0.0
+
+    mse = ss_residuals / (n - 2)  # Mean squared error
+    se_slope = np.sqrt(mse / ss_xx) if mse > 0 and ss_xx > 0 else 0
+
+    if se_slope == 0:
+        # Perfect linear fit - infinite K-ratio, cap it
+        return 10.0 if slope > 0 else -10.0
+
+    # K-Ratio = slope / standard error of slope
+    # This is essentially a t-statistic for the slope
+    k_ratio = slope / se_slope
+
+    # Normalize by sqrt(n) for comparability across different sample sizes
+    # (Original Kestner formula)
+    k_ratio = k_ratio / np.sqrt(n)
+
+    return k_ratio
 
 
 if __name__ == "__main__":

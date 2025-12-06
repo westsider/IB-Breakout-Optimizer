@@ -43,6 +43,7 @@ class OptimizationResult:
     objective_value: float
     run_time_seconds: float = 0.0
     trade_pnls: List[float] = field(default_factory=list)  # Individual trade P&Ls for equity curve
+    k_ratio: float = 0.0  # Kestner ratio for consistency measurement
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for export."""
@@ -56,6 +57,7 @@ class OptimizationResult:
             'sortino_ratio': self.sortino_ratio,
             'max_drawdown': self.max_drawdown,
             'avg_trade': self.avg_trade,
+            'k_ratio': self.k_ratio,
             'objective_value': self.objective_value,
             'run_time': self.run_time_seconds
             # Note: trade_pnls not included in CSV export to keep file size manageable
@@ -449,6 +451,36 @@ def _mmap_backtest_worker(
     drawdown = running_max - equity
     max_drawdown = drawdown.max() if len(drawdown) > 0 else 0
 
+    # K-Ratio (Kestner Ratio) - measures consistency of returns
+    # K-Ratio = slope / standard_error normalized by sqrt(n)
+    k_ratio = 0.0
+    n = len(equity)
+    if n >= 3:
+        x = np.arange(1, n + 1, dtype=np.float64)
+        y = equity.astype(np.float64)
+
+        x_mean = x.mean()
+        y_mean = y.mean()
+
+        ss_xx = np.sum((x - x_mean) ** 2)
+        ss_xy = np.sum((x - x_mean) * (y - y_mean))
+
+        if ss_xx > 0:
+            slope = ss_xy / ss_xx
+            y_pred = slope * x + (y_mean - slope * x_mean)
+            residuals = y - y_pred
+            ss_residuals = np.sum(residuals ** 2)
+
+            mse = ss_residuals / (n - 2)
+            se_slope = np.sqrt(mse / ss_xx) if mse > 0 else 0
+
+            if se_slope > 0:
+                k_ratio = (slope / se_slope) / np.sqrt(n)
+            elif slope > 0:
+                k_ratio = 10.0  # Cap for perfect fit
+            elif slope < 0:
+                k_ratio = -10.0
+
     # Calculate objective value
     if objective == "sharpe_ratio":
         obj_value = sharpe
@@ -460,6 +492,8 @@ def _mmap_backtest_worker(
         obj_value = total_pnl
     elif objective == "win_rate":
         obj_value = win_rate
+    elif objective == "k_ratio":
+        obj_value = k_ratio
     else:
         obj_value = sharpe
 
@@ -475,7 +509,8 @@ def _mmap_backtest_worker(
         avg_trade=avg_trade,
         objective_value=obj_value,
         run_time_seconds=time.time() - start_time,
-        trade_pnls=pnls.tolist()
+        trade_pnls=pnls.tolist(),
+        k_ratio=k_ratio
     )
 
 
