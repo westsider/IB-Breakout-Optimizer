@@ -506,10 +506,12 @@ class TradeBrowserTab(QWidget):
         if entry_idx is not None:
             entry_color = '#00ff00' if trade.direction.value == 'long' else '#ff4444'
 
-            # Entry arrow
+            # Entry arrow: up triangle for long (buying), down triangle for short (selling)
+            # pyqtgraph: 't' = triangle pointing up, 't1' = triangle pointing down
+            entry_symbol = 't' if trade.direction.value == 'long' else 't1'
             self.chart_widget.plot(
                 [entry_idx], [trade.entry_price],
-                pen=None, symbol='t' if trade.direction.value == 'long' else 't1',
+                pen=None, symbol=entry_symbol,
                 symbolPen=entry_color,
                 symbolBrush=entry_color,
                 symbolSize=14
@@ -533,10 +535,11 @@ class TradeBrowserTab(QWidget):
         if exit_idx is not None and trade.exit_price:
             exit_color = '#00ff00' if trade.pnl >= 0 else '#ff4444'
 
-            # Exit arrow (inverted)
+            # Exit arrow: down triangle for long (selling to close), up triangle for short (buying to cover)
+            exit_symbol = 't1' if trade.direction.value == 'long' else 't'
             self.chart_widget.plot(
                 [exit_idx], [trade.exit_price],
-                pen=None, symbol='t1' if trade.direction.value == 'long' else 't',
+                pen=None, symbol=exit_symbol,
                 symbolPen=exit_color,
                 symbolBrush=exit_color,
                 symbolSize=14
@@ -587,10 +590,11 @@ class TradeBrowserTab(QWidget):
         entry_bar = 0
         exit_bar = trade.bars_held if trade.bars_held > 0 else 10
 
-        # Plot entry and exit points
+        # Entry arrow: up triangle for long (buying), down triangle for short (selling)
+        entry_symbol = 't' if trade.direction.value == 'long' else 't1'
         self.chart_widget.plot(
             [entry_bar], [trade.entry_price],
-            pen=None, symbol='t',
+            pen=None, symbol=entry_symbol,
             symbolPen='g' if trade.direction.value == 'long' else 'r',
             symbolBrush='g' if trade.direction.value == 'long' else 'r',
             symbolSize=15,
@@ -598,9 +602,11 @@ class TradeBrowserTab(QWidget):
         )
 
         if trade.exit_price:
+            # Exit arrow: down triangle for long (selling), up triangle for short (buying to cover)
+            exit_symbol = 't1' if trade.direction.value == 'long' else 't'
             self.chart_widget.plot(
                 [exit_bar], [trade.exit_price],
-                pen=None, symbol='t1',
+                pen=None, symbol=exit_symbol,
                 symbolPen='g' if trade.pnl >= 0 else 'r',
                 symbolBrush='g' if trade.pnl >= 0 else 'r',
                 symbolSize=15,
