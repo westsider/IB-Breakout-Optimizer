@@ -111,7 +111,7 @@ class MainWindow(QMainWindow):
         # Create tabs
         self.backtest_tab = BacktestTab(self.data_dir, self.output_dir)
         self.optimization_tab = OptimizationTab(self.data_dir, self.output_dir)
-        self.trade_browser_tab = TradeBrowserTab()
+        self.trade_browser_tab = TradeBrowserTab(self.data_dir)
         self.ib_analysis_tab = IBAnalysisTab()
         self.equity_curve_tab = EquityCurveTab()
         self.download_tab = DownloadTab(self.data_dir)
@@ -185,6 +185,7 @@ class MainWindow(QMainWindow):
             self.backtest_tab.set_data_dir(directory)
             self.optimization_tab.set_data_dir(directory)
             self.download_tab.set_data_dir(directory)
+            self.trade_browser_tab.set_data_dir(directory)
 
             self.status_label.setText(f"Data directory set to: {directory}")
 

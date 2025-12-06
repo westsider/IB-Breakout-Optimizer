@@ -1,6 +1,9 @@
 """
-Trade Browser Tab - Browse and filter trades with charts.
+Trade Browser Tab - Browse and filter trades with candlestick charts.
 """
+
+from pathlib import Path
+from datetime import datetime, timedelta
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
@@ -12,15 +15,69 @@ from PySide6.QtCore import Qt, QDate
 from PySide6.QtGui import QColor
 
 import pyqtgraph as pg
+import numpy as np
+
+
+class CandlestickItem(pg.GraphicsObject):
+    """Custom candlestick graphics item for pyqtgraph."""
+
+    def __init__(self, data):
+        """
+        data: list of tuples (index, open, high, low, close)
+        """
+        pg.GraphicsObject.__init__(self)
+        self.data = data
+        self.generatePicture()
+
+    def generatePicture(self):
+        from PySide6.QtGui import QPainter, QPicture
+        from PySide6.QtCore import QRectF
+
+        self.picture = QPicture()
+        p = QPainter(self.picture)
+
+        w = 0.4  # Half width of candle body
+
+        for (i, open_price, high, low, close) in self.data:
+            if close >= open_price:
+                # Bullish - green
+                p.setPen(pg.mkPen('#00aa00', width=1))
+                p.setBrush(pg.mkBrush('#00aa00'))
+            else:
+                # Bearish - red
+                p.setPen(pg.mkPen('#cc0000', width=1))
+                p.setBrush(pg.mkBrush('#cc0000'))
+
+            # Draw wick (high-low line)
+            p.drawLine(pg.QtCore.QPointF(i, low), pg.QtCore.QPointF(i, high))
+
+            # Draw body
+            p.drawRect(QRectF(i - w, open_price, w * 2, close - open_price))
+
+        p.end()
+
+    def paint(self, p, *args):
+        p.drawPicture(0, 0, self.picture)
+
+    def boundingRect(self):
+        from PySide6.QtCore import QRectF
+        return QRectF(self.picture.boundingRect())
 
 
 class TradeBrowserTab(QWidget):
-    """Tab for browsing and filtering trades."""
+    """Tab for browsing and filtering trades with candlestick charts."""
 
-    def __init__(self):
+    def __init__(self, data_dir: str = ""):
         super().__init__()
         self.trades = []
+        self.data_dir = data_dir
+        self.bar_cache = {}  # Cache loaded bar data by ticker
         self._setup_ui()
+
+    def set_data_dir(self, path: str):
+        """Update data directory."""
+        self.data_dir = path
+        self.bar_cache = {}  # Clear cache when data dir changes
 
     def _setup_ui(self):
         """Create the UI layout."""
@@ -107,20 +164,20 @@ class TradeBrowserTab(QWidget):
         chart_layout = QVBoxLayout(chart_frame)
         chart_layout.setContentsMargins(0, 0, 0, 0)
 
-        chart_label = QLabel("Trade Chart (select a trade above)")
-        chart_label.setStyleSheet("font-weight: bold;")
-        chart_layout.addWidget(chart_label)
+        self.chart_label = QLabel("Trade Chart (select a trade above)")
+        self.chart_label.setStyleSheet("font-weight: bold;")
+        chart_layout.addWidget(self.chart_label)
 
         # PyQtGraph chart
         self.chart_widget = pg.PlotWidget()
         self.chart_widget.setBackground('#1e1e1e')
         self.chart_widget.showGrid(x=True, y=True, alpha=0.3)
         self.chart_widget.setLabel('left', 'Price')
-        self.chart_widget.setLabel('bottom', 'Bar')
+        self.chart_widget.setLabel('bottom', 'Time')
         chart_layout.addWidget(self.chart_widget)
 
         splitter.addWidget(chart_frame)
-        splitter.setSizes([400, 300])
+        splitter.setSizes([350, 350])
 
         layout.addWidget(splitter)
 
@@ -130,8 +187,8 @@ class TradeBrowserTab(QWidget):
 
         # Set date range based on actual trade dates
         if trades:
-            min_date = min(t.entry_time.date() for t in trades)
-            max_date = max(t.entry_time.date() for t in trades)
+            min_date = min(t.entry_time.date() for t in trades if t.entry_time)
+            max_date = max(t.entry_time.date() for t in trades if t.entry_time)
             self.date_from.setDate(QDate(min_date.year, min_date.month, min_date.day))
             self.date_to.setDate(QDate(max_date.year, max_date.month, max_date.day))
 
@@ -180,7 +237,7 @@ class TradeBrowserTab(QWidget):
         date_to = self.date_to.date().toPython()
         filtered = [
             t for t in filtered
-            if date_from <= t.entry_time.date() <= date_to
+            if t.entry_time and date_from <= t.entry_time.date() <= date_to
         ]
 
         # Update table
@@ -194,7 +251,7 @@ class TradeBrowserTab(QWidget):
         for row, trade in enumerate(trades):
             # Store trade reference in first item
             entry_item = QTableWidgetItem(
-                trade.entry_time.strftime('%Y-%m-%d %H:%M')
+                trade.entry_time.strftime('%Y-%m-%d %H:%M') if trade.entry_time else ""
             )
             entry_item.setData(Qt.UserRole, trade)
             self.trade_table.setItem(row, 0, entry_item)
@@ -261,15 +318,203 @@ class TradeBrowserTab(QWidget):
         if trade:
             self._show_trade_chart(trade)
 
+    def _load_bars_for_date(self, ticker: str, trade_date) -> list:
+        """Load bar data for a specific date."""
+        if not self.data_dir:
+            return []
+
+        # Check cache first
+        cache_key = f"{ticker}_{trade_date}"
+        if cache_key in self.bar_cache:
+            return self.bar_cache[cache_key]
+
+        try:
+            from data.data_loader import DataLoader
+
+            # Find data file
+            data_path = Path(self.data_dir)
+            data_file = None
+
+            for f in data_path.iterdir():
+                if f.is_file() and ticker.upper() in f.name.upper():
+                    if f.suffix.lower() in ['.txt', '.csv']:
+                        data_file = f
+                        if '_NT' in f.name.upper():
+                            break  # Prefer NT format
+
+            if not data_file:
+                return []
+
+            # Load data
+            loader = DataLoader(str(data_path))
+            df = loader.load_auto_detect(str(data_file), ticker)
+
+            # Filter to trade date
+            df['date'] = df['timestamp'].dt.date
+            day_df = df[df['date'] == trade_date].copy()
+
+            if day_df.empty:
+                return []
+
+            # Convert to list of tuples for candlestick
+            bars = []
+            for idx, (_, row) in enumerate(day_df.iterrows()):
+                bars.append({
+                    'index': idx,
+                    'timestamp': row['timestamp'],
+                    'open': row['open'],
+                    'high': row['high'],
+                    'low': row['low'],
+                    'close': row['close']
+                })
+
+            # Cache result
+            self.bar_cache[cache_key] = bars
+            return bars
+
+        except Exception as e:
+            print(f"Error loading bars: {e}")
+            return []
+
     def _show_trade_chart(self, trade):
-        """Display a chart for the selected trade."""
+        """Display a candlestick chart for the selected trade."""
         self.chart_widget.clear()
 
-        # For now, show a simple representation
-        # In a full implementation, we'd load the actual bar data
+        if not trade.entry_time:
+            return
 
+        # Update chart label
+        direction = "LONG" if trade.direction.value == "long" else "SHORT"
+        pnl_str = f"${trade.pnl:+.2f}" if trade.pnl >= 0 else f"-${abs(trade.pnl):.2f}"
+        self.chart_label.setText(
+            f"{trade.ticker} | {trade.entry_time.strftime('%Y-%m-%d')} | "
+            f"{direction} | {pnl_str}"
+        )
+
+        # Load bar data for the trade date
+        bars = self._load_bars_for_date(trade.ticker, trade.entry_time.date())
+
+        if not bars:
+            # Fall back to simple display if no bar data
+            self._show_simple_chart(trade)
+            return
+
+        # Find entry and exit bar indices
+        entry_idx = None
+        exit_idx = None
+
+        for bar in bars:
+            if entry_idx is None and bar['timestamp'] >= trade.entry_time:
+                entry_idx = bar['index']
+            if trade.exit_time and exit_idx is None and bar['timestamp'] >= trade.exit_time:
+                exit_idx = bar['index']
+
+        # If exact match not found, use closest
+        if entry_idx is None and bars:
+            entry_idx = 0
+        if exit_idx is None and trade.exit_time and bars:
+            exit_idx = len(bars) - 1
+
+        # Create candlestick data
+        candle_data = [
+            (bar['index'], bar['open'], bar['high'], bar['low'], bar['close'])
+            for bar in bars
+        ]
+
+        # Add candlesticks
+        candlestick = CandlestickItem(candle_data)
+        self.chart_widget.addItem(candlestick)
+
+        # Determine y-axis range
+        all_highs = [bar['high'] for bar in bars]
+        all_lows = [bar['low'] for bar in bars]
+        y_min = min(all_lows) * 0.999
+        y_max = max(all_highs) * 1.001
+
+        # Draw entry marker
+        if entry_idx is not None:
+            entry_color = '#00ff00' if trade.direction.value == 'long' else '#ff4444'
+
+            # Entry arrow
+            self.chart_widget.plot(
+                [entry_idx], [trade.entry_price],
+                pen=None, symbol='t' if trade.direction.value == 'long' else 't1',
+                symbolPen=entry_color,
+                symbolBrush=entry_color,
+                symbolSize=14
+            )
+
+            # Entry horizontal line
+            self.chart_widget.addLine(
+                y=trade.entry_price,
+                pen=pg.mkPen(entry_color, width=1, style=Qt.DashLine)
+            )
+
+            # Entry label
+            entry_text = pg.TextItem(
+                f"Entry: ${trade.entry_price:.2f}",
+                color=entry_color, anchor=(0, 1)
+            )
+            entry_text.setPos(entry_idx + 1, trade.entry_price)
+            self.chart_widget.addItem(entry_text)
+
+        # Draw exit marker
+        if exit_idx is not None and trade.exit_price:
+            exit_color = '#00ff00' if trade.pnl >= 0 else '#ff4444'
+
+            # Exit arrow (inverted)
+            self.chart_widget.plot(
+                [exit_idx], [trade.exit_price],
+                pen=None, symbol='t1' if trade.direction.value == 'long' else 't',
+                symbolPen=exit_color,
+                symbolBrush=exit_color,
+                symbolSize=14
+            )
+
+            # Exit horizontal line
+            self.chart_widget.addLine(
+                y=trade.exit_price,
+                pen=pg.mkPen(exit_color, width=1, style=Qt.DashLine)
+            )
+
+            # Exit label
+            exit_text = pg.TextItem(
+                f"Exit: ${trade.exit_price:.2f}\nP&L: ${trade.pnl:+.2f}",
+                color=exit_color, anchor=(1, 0)
+            )
+            exit_text.setPos(exit_idx - 1, trade.exit_price)
+            self.chart_widget.addItem(exit_text)
+
+            # Shade the trade region
+            if entry_idx is not None:
+                region = pg.LinearRegionItem(
+                    values=[entry_idx, exit_idx],
+                    orientation='vertical',
+                    brush=pg.mkBrush(exit_color + '20'),  # Semi-transparent
+                    pen=pg.mkPen(None),
+                    movable=False
+                )
+                self.chart_widget.addItem(region)
+
+        # Set axis ranges
+        self.chart_widget.setYRange(y_min, y_max, padding=0.02)
+        self.chart_widget.setXRange(0, len(bars), padding=0.02)
+
+        # Add time axis labels (show every N bars)
+        if bars:
+            # Create custom axis labels
+            time_labels = {}
+            step = max(1, len(bars) // 10)  # Show ~10 labels
+            for i in range(0, len(bars), step):
+                time_labels[i] = bars[i]['timestamp'].strftime('%H:%M')
+
+            axis = self.chart_widget.getAxis('bottom')
+            axis.setTicks([list(time_labels.items())])
+
+    def _show_simple_chart(self, trade):
+        """Fallback simple chart when bar data not available."""
         entry_bar = 0
-        exit_bar = trade.bars_held
+        exit_bar = trade.bars_held if trade.bars_held > 0 else 10
 
         # Plot entry and exit points
         self.chart_widget.plot(
@@ -315,3 +560,11 @@ class TradeBrowserTab(QWidget):
             )
             exit_text.setPos(exit_bar, trade.exit_price)
             self.chart_widget.addItem(exit_text)
+
+        # Note about missing data
+        note = pg.TextItem(
+            "Bar data not available - showing simplified view",
+            color='#888888', anchor=(0.5, 0)
+        )
+        note.setPos(exit_bar / 2, trade.entry_price * 1.01)
+        self.chart_widget.addItem(note)
