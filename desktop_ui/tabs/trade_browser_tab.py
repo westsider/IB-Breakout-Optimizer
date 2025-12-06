@@ -458,8 +458,8 @@ class TradeBrowserTab(QWidget):
             entry_color = '#00ff00' if trade.direction.value == 'long' else '#ff4444'
 
             # Entry arrow: up triangle for long (buying), down triangle for short (selling)
-            # pyqtgraph: 't' = triangle pointing up, 't1' = triangle pointing down
-            entry_symbol = 't' if trade.direction.value == 'long' else 't1'
+            # pyqtgraph: 't1' = triangle pointing up, 't' = triangle pointing down
+            entry_symbol = 't1' if trade.direction.value == 'long' else 't'
             self.chart_widget.plot(
                 [entry_idx], [trade.entry_price],
                 pen=None, symbol=entry_symbol,
@@ -487,7 +487,7 @@ class TradeBrowserTab(QWidget):
             exit_color = '#00ff00' if trade.pnl >= 0 else '#ff4444'
 
             # Exit arrow: down triangle for long (selling to close), up triangle for short (buying to cover)
-            exit_symbol = 't1' if trade.direction.value == 'long' else 't'
+            exit_symbol = 't' if trade.direction.value == 'long' else 't1'
             self.chart_widget.plot(
                 [exit_idx], [trade.exit_price],
                 pen=None, symbol=exit_symbol,
@@ -597,7 +597,8 @@ class TradeBrowserTab(QWidget):
         exit_bar = trade.bars_held if trade.bars_held > 0 else 10
 
         # Entry arrow: up triangle for long (buying), down triangle for short (selling)
-        entry_symbol = 't' if trade.direction.value == 'long' else 't1'
+        # pyqtgraph: 't1' = triangle pointing up, 't' = triangle pointing down
+        entry_symbol = 't1' if trade.direction.value == 'long' else 't'
         self.chart_widget.plot(
             [entry_bar], [trade.entry_price],
             pen=None, symbol=entry_symbol,
@@ -609,7 +610,7 @@ class TradeBrowserTab(QWidget):
 
         if trade.exit_price:
             # Exit arrow: down triangle for long (selling), up triangle for short (buying to cover)
-            exit_symbol = 't1' if trade.direction.value == 'long' else 't'
+            exit_symbol = 't' if trade.direction.value == 'long' else 't1'
             self.chart_widget.plot(
                 [exit_bar], [trade.exit_price],
                 pen=None, symbol=exit_symbol,
