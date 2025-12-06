@@ -120,6 +120,10 @@ class MainWindow(QMainWindow):
         self.backtest_tab.backtest_complete.connect(self._on_backtest_complete)
         self.optimization_tab.optimization_complete.connect(self._on_optimization_complete)
 
+        # Connect optimization result double-click to run backtest
+        self.optimization_tab.results_table.doubleClicked.connect(self._on_optimization_result_double_clicked)
+        self.optimization_tab.best_params_table.doubleClicked.connect(self._on_best_params_double_clicked)
+
         # Add tabs
         self.tabs.addTab(self.backtest_tab, "Backtest")
         self.tabs.addTab(self.optimization_tab, "Optimization")
@@ -135,6 +139,9 @@ class MainWindow(QMainWindow):
 
         # Save tab changes
         self.tabs.currentChanged.connect(self._on_tab_changed)
+
+        # Load saved trades on startup
+        self._load_saved_trades()
 
     def _setup_status_bar(self):
         """Create the status bar."""
@@ -238,6 +245,48 @@ class MainWindow(QMainWindow):
     def _on_tab_changed(self, index: int):
         """Save current tab when changed."""
         self.settings.setValue("last_tab", index)
+
+    def _load_saved_trades(self):
+        """Load saved trades on startup."""
+        trades = self.backtest_tab.load_saved_trades()
+        if trades:
+            self.trade_browser_tab.load_trades(trades)
+            self.equity_curve_tab.load_trades(trades)
+            self.ib_analysis_tab.load_trades(trades)
+            self.status_label.setText(f"Loaded {len(trades)} saved trades")
+
+    def _on_optimization_result_double_clicked(self, index):
+        """Handle double-click on optimization result to run backtest with those params."""
+        row = index.row()
+        if not hasattr(self.optimization_tab, 'top_results_data'):
+            return
+        if row >= len(self.optimization_tab.top_results_data):
+            return
+
+        result = self.optimization_tab.top_results_data[row]
+        self._run_backtest_with_params(result)
+
+    def _on_best_params_double_clicked(self, index):
+        """Handle double-click on best params to run backtest."""
+        if hasattr(self.optimization_tab, 'best_params') and self.optimization_tab.best_params:
+            self._run_backtest_with_params(self.optimization_tab.best_params)
+
+    def _run_backtest_with_params(self, params: dict):
+        """Load params into backtest tab and run."""
+        # Set ticker if available
+        ticker = self.optimization_tab.ticker_combo.currentText()
+        idx = self.backtest_tab.ticker_combo.findText(ticker)
+        if idx >= 0:
+            self.backtest_tab.ticker_combo.setCurrentIndex(idx)
+
+        # Load the parameters
+        self.backtest_tab.load_params_from_json(params)
+
+        # Switch to backtest tab and run
+        self.tabs.setCurrentWidget(self.backtest_tab)
+        self.backtest_tab._run_backtest()
+
+        self.status_label.setText(f"Running backtest with optimization params...")
 
     def closeEvent(self, event):
         """Handle window close."""

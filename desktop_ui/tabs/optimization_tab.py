@@ -28,6 +28,8 @@ class OptimizationTab(QWidget):
         self.worker = None
         self.last_results = None
         self.previous_results = None  # For delta comparison
+        self.best_params = None  # Store best params for double-click handler
+        self.top_results_data = []  # Store results for double-click handler
         self.settings = QSettings("TradingTools", "IBBreakoutOptimizer")
 
         self._setup_ui()
@@ -69,7 +71,23 @@ class OptimizationTab(QWidget):
             "profit_factor", "sharpe_ratio", "sortino_ratio",
             "total_profit", "calmar_ratio", "win_rate", "k_ratio"
         ])
+        self.objective_combo.setToolTip(
+            "profit_factor: Gross profit / gross loss\n"
+            "sharpe_ratio: Risk-adjusted returns\n"
+            "sortino_ratio: Downside risk-adjusted returns\n"
+            "total_profit: Total P&L\n"
+            "calmar_ratio: Return / max drawdown\n"
+            "win_rate: Percentage of winning trades\n"
+            "k_ratio: Smooth equity curve (consistency)"
+        )
         data_layout.addWidget(self.objective_combo, 2, 1)
+
+        # Add objective description label
+        self.objective_desc = QLabel("")
+        self.objective_desc.setStyleSheet("color: #888888; font-size: 11px;")
+        data_layout.addWidget(self.objective_desc, 2, 2)
+        self.objective_combo.currentTextChanged.connect(self._update_objective_desc)
+        self._update_objective_desc(self.objective_combo.currentText())
 
         # Connect change signals for saving
         self.ticker_combo.currentTextChanged.connect(self._save_settings)
@@ -280,6 +298,19 @@ class OptimizationTab(QWidget):
         }
         self.preset_info.setText(info.get(preset_name, ""))
 
+    def _update_objective_desc(self, objective: str):
+        """Update objective description label."""
+        descriptions = {
+            "profit_factor": "gross profit / gross loss",
+            "sharpe_ratio": "risk-adjusted returns",
+            "sortino_ratio": "downside risk-adjusted",
+            "total_profit": "total P&L",
+            "calmar_ratio": "return / max drawdown",
+            "win_rate": "% winning trades",
+            "k_ratio": "smooth equity curve"
+        }
+        self.objective_desc.setText(descriptions.get(objective, ""))
+
     def set_data_dir(self, path: str):
         """Update data directory."""
         self.data_dir = path
@@ -487,6 +518,7 @@ class OptimizationTab(QWidget):
 
         # Populate best parameters table
         best_params = results.get('best_params', {})
+        self.best_params = best_params  # Store for double-click handler
         self._populate_best_params(best_params)
 
         # Populate top results table
@@ -574,7 +606,7 @@ class OptimizationTab(QWidget):
 
     def _populate_top_results(self, results: list):
         """Fill the top results table."""
-        self.top_results_data = results  # Store for equity curve generation
+        self.top_results_data = results  # Store for equity curve and double-click handler
         self.results_table.setRowCount(len(results))
 
         for row, result in enumerate(results):

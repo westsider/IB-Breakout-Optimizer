@@ -2,6 +2,10 @@
 Backtest Tab - Run backtests with custom parameters.
 """
 
+import json
+from pathlib import Path
+from datetime import datetime
+
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QComboBox, QDoubleSpinBox, QSpinBox, QCheckBox,
@@ -13,6 +17,7 @@ from PySide6.QtGui import QColor
 
 from desktop_ui.workers.backtest_worker import BacktestWorker
 from desktop_ui.widgets.metrics_panel import MetricsPanel
+from data.data_types import Trade, TradeDirection, ExitReason
 
 
 class BacktestTab(QWidget):
@@ -270,7 +275,11 @@ class BacktestTab(QWidget):
         self.metrics_panel.update_metrics(metrics)
 
         # Update trade table
-        self._populate_trade_table(result.trades if result else [])
+        trades = result.trades if result else []
+        self._populate_trade_table(trades)
+
+        # Auto-save trades for persistence
+        self.save_trades(trades)
 
         # Emit signal for other tabs
         self.backtest_complete.emit(result, metrics)
@@ -376,3 +385,102 @@ class BacktestTab(QWidget):
             self.maxbars_check.setChecked(params['max_bars_enabled'])
             if params['max_bars_enabled'] and 'max_bars' in params:
                 self.maxbars_spin.setValue(params['max_bars'])
+
+    def _get_trades_file_path(self) -> Path:
+        """Get path to saved trades file."""
+        return Path(self.output_dir) / "last_trades.json"
+
+    def save_trades(self, trades: list):
+        """Save trades to JSON for persistence."""
+        if not trades:
+            return
+
+        trades_data = []
+        for trade in trades:
+            trade_dict = {
+                'trade_id': trade.trade_id,
+                'ticker': trade.ticker,
+                'direction': trade.direction.value,
+                'entry_time': trade.entry_time.isoformat() if trade.entry_time else None,
+                'entry_price': trade.entry_price,
+                'exit_time': trade.exit_time.isoformat() if trade.exit_time else None,
+                'exit_price': trade.exit_price,
+                'quantity': trade.quantity,
+                'pnl': trade.pnl,
+                'pnl_pct': trade.pnl_pct,
+                'commission': trade.commission,
+                'exit_reason': trade.exit_reason.value if trade.exit_reason else None,
+                'mae': trade.mae,
+                'mfe': trade.mfe,
+                'bars_held': trade.bars_held
+            }
+            trades_data.append(trade_dict)
+
+        # Save to file
+        trades_file = self._get_trades_file_path()
+        trades_file.parent.mkdir(parents=True, exist_ok=True)
+
+        with open(trades_file, 'w') as f:
+            json.dump({
+                'saved_at': datetime.now().isoformat(),
+                'ticker': self.ticker_combo.currentText(),
+                'trade_count': len(trades_data),
+                'trades': trades_data
+            }, f, indent=2)
+
+    def load_saved_trades(self) -> list:
+        """Load trades from saved JSON file."""
+        trades_file = self._get_trades_file_path()
+
+        if not trades_file.exists():
+            return []
+
+        try:
+            with open(trades_file, 'r') as f:
+                data = json.load(f)
+
+            trades = []
+            for td in data.get('trades', []):
+                # Parse exit reason
+                exit_reason = None
+                if td.get('exit_reason'):
+                    try:
+                        exit_reason = ExitReason(td['exit_reason'])
+                    except ValueError:
+                        pass
+
+                # Parse direction
+                direction = TradeDirection.LONG
+                if td.get('direction') == 'short':
+                    direction = TradeDirection.SHORT
+
+                trade = Trade(
+                    trade_id=td.get('trade_id', ''),
+                    ticker=td.get('ticker', ''),
+                    direction=direction,
+                    entry_time=datetime.fromisoformat(td['entry_time']) if td.get('entry_time') else None,
+                    entry_price=td.get('entry_price', 0),
+                    exit_time=datetime.fromisoformat(td['exit_time']) if td.get('exit_time') else None,
+                    exit_price=td.get('exit_price'),
+                    quantity=td.get('quantity', 0),
+                    pnl=td.get('pnl', 0),
+                    pnl_pct=td.get('pnl_pct', 0),
+                    commission=td.get('commission', 0),
+                    exit_reason=exit_reason,
+                    mae=td.get('mae', 0),
+                    mfe=td.get('mfe', 0),
+                    bars_held=td.get('bars_held', 0)
+                )
+                trades.append(trade)
+
+            return trades
+
+        except Exception as e:
+            print(f"Error loading saved trades: {e}")
+            return []
+
+    def get_last_trades(self) -> list:
+        """Get the last backtest's trades (from memory or file)."""
+        if self.last_result and self.last_result.trades:
+            return self.last_result.trades
+        return self.load_saved_trades()
