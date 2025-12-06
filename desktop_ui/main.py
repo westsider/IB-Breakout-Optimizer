@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QPalette, QColor
+from PySide6.QtGui import QPalette, QColor, QIcon
 
 from desktop_ui.main_window import MainWindow
 
@@ -208,6 +208,14 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName("IB Breakout Optimizer")
     app.setOrganizationName("Trading Tools")
+
+    # Set application icon
+    resources_dir = Path(__file__).parent / "resources"
+    for ext in ['.png', '.jpg', '.ico']:
+        icon_path = resources_dir / f"app_icon{ext}"
+        if icon_path.exists():
+            app.setWindowIcon(QIcon(str(icon_path)))
+            break
 
     # Apply dark theme
     setup_dark_theme(app)

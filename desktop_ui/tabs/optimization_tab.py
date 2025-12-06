@@ -19,6 +19,7 @@ class OptimizationTab(QWidget):
     """Tab for running parameter optimization."""
 
     optimization_complete = Signal(dict)  # results dict
+    result_double_clicked = Signal(dict, str)  # params dict, ticker
 
     def __init__(self, data_dir: str, output_dir: str):
         super().__init__()
@@ -257,6 +258,7 @@ class OptimizationTab(QWidget):
         self.results_table.verticalHeader().setDefaultSectionSize(24)  # Compact rows
         self.results_table.verticalHeader().setVisible(False)
         self.results_table.itemSelectionChanged.connect(self._on_result_selected)
+        self.results_table.doubleClicked.connect(self._on_result_double_clicked)
         top_layout.addWidget(self.results_table)
 
         right_splitter.addWidget(top_frame)
@@ -812,10 +814,11 @@ class OptimizationTab(QWidget):
 
             # Populate UI with saved results
             best_params = results.get('best_params', {})
+            self.best_params = best_params  # Store for double-click handler
             self._populate_best_params(best_params)
 
             top_results = results.get('top_results', [])
-            self._populate_top_results(top_results)
+            self._populate_top_results(top_results)  # This also sets self.top_results_data
 
             # Update status to show loaded results
             completed = results.get('completed', 0)
@@ -841,3 +844,19 @@ class OptimizationTab(QWidget):
 
         except Exception as e:
             print(f"Warning: Could not load optimization results: {e}")
+
+    def _on_result_double_clicked(self, index):
+        """Handle double-click on a result row - run full backtest and populate other tabs."""
+        row = index.row()
+        if row >= len(self.top_results_data):
+            return
+
+        result = self.top_results_data[row]
+        ticker = self.ticker_combo.currentText()
+
+        # Emit signal with params and ticker for main window to handle
+        self.result_double_clicked.emit(result, ticker)
+
+    def get_current_ticker(self) -> str:
+        """Get the currently selected ticker."""
+        return self.ticker_combo.currentText()

@@ -47,7 +47,7 @@ This file provides context and guidance for Claude Code when working with this p
 
 **Desktop App (PySide6) - Primary**
 - Native desktop application with professional dark theme
-- 5 tabs: Backtest, Optimization, Equity Curve, Trade Browser, IB Analysis
+- 5 tabs: Optimization, Equity Curve, Trade Browser, IB Analysis, Download
 - QThread workers for non-blocking background processing
 - Live progress updates with elapsed time and ETA
 - Two-phase optimization (Grid + Bayesian) with presets (quick, standard, full, thorough)
@@ -55,6 +55,7 @@ This file provides context and guidance for Claude Code when working with this p
 - Equity curve display for selected optimization results
 - Results persisted between app launches
 - Desktop shortcut and batch file launcher
+- K-Ratio optimization objective for smooth equity curves
 
 **Streamlit App - Alternative**
 - Streamlit app scaffold (`ui/app.py`)
@@ -68,6 +69,18 @@ This file provides context and guidance for Claude Code when working with this p
 - Reusable chart components
 
 ### Pending Phases
+
+#### Phase 4.5: Portfolio View Tab (Not Started)
+- New "Portfolio" tab in desktop app
+- Multi-ticker selection (checkboxes for AAPL, TSLA, MSFT, NVDA, etc.)
+- Load best optimization results for each selected ticker
+- Combined equity curve showing aggregate P&L
+- Portfolio-level statistics:
+  - Total P&L across all tickers
+  - Combined Sharpe ratio
+  - Max portfolio drawdown
+  - Correlation matrix between ticker returns
+- Per-ticker breakdown table showing individual contributions
 
 #### Phase 5: Continuous Learning (Not Started)
 - Performance monitoring (rolling Sharpe, win rate)

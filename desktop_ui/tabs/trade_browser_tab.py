@@ -383,12 +383,17 @@ class TradeBrowserTab(QWidget):
         if not trade.entry_time:
             return
 
-        # Update chart label
+        # Update chart label - include IB duration if available
         direction = "LONG" if trade.direction.value == "long" else "SHORT"
         pnl_str = f"${trade.pnl:+.2f}" if trade.pnl >= 0 else f"-${abs(trade.pnl):.2f}"
+        ib_duration_str = ""
+        if trade.ib and hasattr(trade.ib, 'ib_end_time') and hasattr(trade.ib, 'session_start'):
+            if trade.ib.ib_end_time and trade.ib.session_start:
+                ib_minutes = int((trade.ib.ib_end_time - trade.ib.session_start).total_seconds() / 60)
+                ib_duration_str = f" | IB: {ib_minutes}min"
         self.chart_label.setText(
             f"{trade.ticker} | {trade.entry_time.strftime('%Y-%m-%d')} | "
-            f"{direction} | {pnl_str}"
+            f"{direction} | {pnl_str}{ib_duration_str}"
         )
 
         # Load bar data for the trade date
@@ -517,55 +522,62 @@ class TradeBrowserTab(QWidget):
         if trade.ib and trade.ib.ib_high > 0 and trade.ib.ib_low < float('inf'):
             ib = trade.ib
 
-            # IB High line (white dashed) - use InfiniteLine for full-width line
+            # IB High line (grey dashed) - use InfiniteLine for full-width line
             ib_high_line = pg.InfiniteLine(
                 pos=ib.ib_high,
                 angle=0,  # horizontal
-                pen=pg.mkPen('#ffffff', width=1.5, style=Qt.DashLine)
+                pen=pg.mkPen('#888888', width=1.5, style=Qt.DashLine)
             )
             self.chart_widget.addItem(ib_high_line)
 
             # IB High label
             ib_high_text = pg.TextItem(
                 f"IB High ${ib.ib_high:.2f}",
-                color='#ffffff', anchor=(1, 1)
+                color='#888888', anchor=(1, 1)
             )
             ib_high_text.setPos(len(bars) - 2, ib.ib_high)
             self.chart_widget.addItem(ib_high_text)
 
-            # IB Low line (white dashed)
+            # IB Low line (grey dashed)
             ib_low_line = pg.InfiniteLine(
                 pos=ib.ib_low,
                 angle=0,  # horizontal
-                pen=pg.mkPen('#ffffff', width=1.5, style=Qt.DashLine)
+                pen=pg.mkPen('#888888', width=1.5, style=Qt.DashLine)
             )
             self.chart_widget.addItem(ib_low_line)
 
             # IB Low label
             ib_low_text = pg.TextItem(
                 f"IB Low ${ib.ib_low:.2f}",
-                color='#ffffff', anchor=(1, 0)
+                color='#888888', anchor=(1, 0)
             )
             ib_low_text.setPos(len(bars) - 2, ib.ib_low)
             self.chart_widget.addItem(ib_low_text)
 
-            # Shade the IB period (light cyan)
+            # Shade the IB period (dark grey rectangle from IB low to IB high)
             if ib_start_idx is not None and ib_end_idx is not None:
-                ib_region = pg.LinearRegionItem(
-                    values=[ib_start_idx, ib_end_idx],
-                    orientation='vertical',
-                    brush=pg.mkBrush('#00ffff20'),  # Light cyan, more visible
-                    pen=pg.mkPen('#00ffff', width=1, style=Qt.DotLine),
-                    movable=False
-                )
-                self.chart_widget.addItem(ib_region)
+                from PySide6.QtWidgets import QGraphicsRectItem
+                from PySide6.QtCore import QRectF
 
-                # IB period label at top
+                # Create rectangle from IB low to IB high
+                rect_x = ib_start_idx - 0.5
+                rect_width = (ib_end_idx - ib_start_idx) + 1
+                rect_y = ib.ib_low
+                rect_height = ib.ib_high - ib.ib_low
+
+                ib_rect = QGraphicsRectItem(QRectF(rect_x, rect_y, rect_width, rect_height))
+                ib_rect.setBrush(pg.mkBrush('#333333'))  # Dark grey fill
+                ib_rect.setPen(pg.mkPen(None))  # No border
+                ib_rect.setZValue(-10)  # Behind everything else
+                self.chart_widget.addItem(ib_rect)
+
+                # IB period label at top of rectangle
+                ib_duration = ib_end_idx - ib_start_idx + 1
                 ib_label = pg.TextItem(
-                    "IB Period",
-                    color='#00ffff', anchor=(0.5, 1)
+                    f"IB ({ib_duration} bars)",
+                    color='#666666', anchor=(0.5, 0)
                 )
-                ib_label.setPos((ib_start_idx + ib_end_idx) / 2, y_max * 0.999)
+                ib_label.setPos((ib_start_idx + ib_end_idx) / 2, ib.ib_high)
                 self.chart_widget.addItem(ib_label)
 
         # Add time axis labels (show every N bars)

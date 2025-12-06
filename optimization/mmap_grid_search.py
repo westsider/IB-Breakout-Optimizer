@@ -187,6 +187,18 @@ def _mmap_backtest_worker(
     break_even_enabled = params.get('break_even_enabled', False)
     break_even_pct = params.get('break_even_pct', 0.5)
 
+    # Parse max_breakout_time (e.g., "14:00" -> hour=14, minute=0)
+    max_breakout_str = params.get('max_breakout_time', '14:00')
+    max_breakout_parts = max_breakout_str.split(':')
+    max_breakout_hour = int(max_breakout_parts[0])
+    max_breakout_minute = int(max_breakout_parts[1]) if len(max_breakout_parts) > 1 else 0
+
+    # Parse eod_exit_time (e.g., "15:55" -> hour=15, minute=55)
+    eod_exit_str = params.get('eod_exit_time', '15:55')
+    eod_exit_parts = eod_exit_str.split(':')
+    eod_exit_hour = int(eod_exit_parts[0])
+    eod_exit_minute = int(eod_exit_parts[1]) if len(eod_exit_parts) > 1 else 0
+
     # Compute IB levels for each day
     # IB starts at 9:30, so IB end = 9:30 + ib_duration minutes
     # Convert to hour:minute format
@@ -245,13 +257,13 @@ def _mmap_backtest_worker(
         if found_breakout:
             continue
 
-        # Check if in post-IB trading window
+        # Check if in post-IB trading window (after IB ends, before max_breakout_time)
         in_window = False
-        if h == ib_end_hour and m >= ib_end_minute:
-            in_window = True
-        elif h > ib_end_hour and h < 14:  # Before 2 PM
-            in_window = True
-        elif h == 14 and m == 0:
+        bar_minutes = h * 60 + m
+        ib_end_minutes = ib_end_hour * 60 + ib_end_minute
+        max_breakout_minutes = max_breakout_hour * 60 + max_breakout_minute
+
+        if bar_minutes >= ib_end_minutes and bar_minutes <= max_breakout_minutes:
             in_window = True
 
         if not in_window:
@@ -270,6 +282,7 @@ def _mmap_backtest_worker(
         if ib_high == 0 or ib_low == 0:
             continue
 
+        # Use HIGH/LOW for breakout detection (more sensitive, detects intrabar breakouts)
         long_break = highs[i] > ib_high
         short_break = lows[i] < ib_low
 
@@ -333,6 +346,9 @@ def _mmap_backtest_worker(
         # Track best price for trailing stop
         best_price = entry_price
 
+        # Calculate EOD exit time in minutes
+        eod_minutes = eod_exit_hour * 60 + eod_exit_minute
+
         # Scan forward from entry
         for j in range(entry_idx + 1, n_bars):
             # Check if still same day
@@ -341,6 +357,15 @@ def _mmap_backtest_worker(
                 if j > entry_idx + 1:
                     exit_price = closes[j - 1]
                     exit_reason = 'eod'
+                break
+
+            # Check for EOD exit time
+            bar_h = hours[j]
+            bar_m = minutes[j]
+            bar_minutes = bar_h * 60 + bar_m
+            if bar_minutes >= eod_minutes:
+                exit_price = closes[j]
+                exit_reason = 'eod'
                 break
 
             # Update best price and trailing stop

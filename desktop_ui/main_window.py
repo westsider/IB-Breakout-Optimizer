@@ -9,12 +9,12 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QSettings
 from PySide6.QtGui import QAction
 
-from desktop_ui.tabs.backtest_tab import BacktestTab
 from desktop_ui.tabs.optimization_tab import OptimizationTab
 from desktop_ui.tabs.trade_browser_tab import TradeBrowserTab
 from desktop_ui.tabs.ib_analysis_tab import IBAnalysisTab
 from desktop_ui.tabs.equity_curve_tab import EquityCurveTab
 from desktop_ui.tabs.download_tab import DownloadTab
+from desktop_ui.workers.backtest_worker import BacktestWorker
 
 
 class MainWindow(QMainWindow):
@@ -53,9 +53,6 @@ class MainWindow(QMainWindow):
         self._setup_menu_bar()
         self._setup_central_widget()
         self._setup_status_bar()
-
-        # Load saved trades after UI is fully initialized
-        self._load_saved_trades()
 
     def _setup_menu_bar(self):
         """Create the menu bar."""
@@ -112,7 +109,6 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.tabs)
 
         # Create tabs
-        self.backtest_tab = BacktestTab(self.data_dir, self.output_dir)
         self.optimization_tab = OptimizationTab(self.data_dir, self.output_dir)
         self.trade_browser_tab = TradeBrowserTab(self.data_dir)
         self.ib_analysis_tab = IBAnalysisTab()
@@ -120,15 +116,13 @@ class MainWindow(QMainWindow):
         self.download_tab = DownloadTab(self.data_dir)
 
         # Connect tabs for sharing data
-        self.backtest_tab.backtest_complete.connect(self._on_backtest_complete)
         self.optimization_tab.optimization_complete.connect(self._on_optimization_complete)
+        self.optimization_tab.result_double_clicked.connect(self._on_result_double_clicked)
 
-        # Connect optimization result double-click to run backtest
-        self.optimization_tab.results_table.doubleClicked.connect(self._on_optimization_result_double_clicked)
-        self.optimization_tab.best_params_table.doubleClicked.connect(self._on_best_params_double_clicked)
+        # Backtest worker for populating other tabs
+        self.backtest_worker = None
 
         # Add tabs
-        self.tabs.addTab(self.backtest_tab, "Backtest")
         self.tabs.addTab(self.optimization_tab, "Optimization")
         self.tabs.addTab(self.equity_curve_tab, "Equity Curve")
         self.tabs.addTab(self.trade_browser_tab, "Trade Browser")
@@ -182,7 +176,6 @@ class MainWindow(QMainWindow):
             self.data_dir_label.setText(f"Data: {directory}")
 
             # Update tabs
-            self.backtest_tab.set_data_dir(directory)
             self.optimization_tab.set_data_dir(directory)
             self.download_tab.set_data_dir(directory)
             self.trade_browser_tab.set_data_dir(directory)
@@ -201,27 +194,56 @@ class MainWindow(QMainWindow):
             self.settings.setValue("output_dir", directory)
 
             # Update tabs
-            self.backtest_tab.set_output_dir(directory)
             self.optimization_tab.set_output_dir(directory)
 
             self.status_label.setText(f"Output directory set to: {directory}")
-
-    def _on_backtest_complete(self, result, metrics):
-        """Handle backtest completion."""
-        trades = result.trades if result else []
-        self.trade_browser_tab.load_trades(trades)
-        self.equity_curve_tab.load_trades(trades)
-        self.ib_analysis_tab.load_trades(trades)
-        self.status_label.setText(
-            f"Backtest complete: {metrics.total_trades} trades, "
-            f"P&L: ${metrics.total_net_profit:,.2f}"
-        )
 
     def _on_optimization_complete(self, results):
         """Handle optimization completion."""
         self.status_label.setText(
             f"Optimization complete: {results.get('completed', 0)} combinations tested"
         )
+
+    def _on_result_double_clicked(self, params: dict, ticker: str):
+        """Handle double-click on optimization result - run full backtest."""
+        self.status_label.setText(f"Running backtest for {ticker}...")
+        self.status_label.setStyleSheet("color: #2a82da;")
+
+        # Start backtest worker
+        self.backtest_worker = BacktestWorker(self.data_dir, params, ticker)
+        self.backtest_worker.status.connect(self._on_backtest_status)
+        self.backtest_worker.finished.connect(self._on_backtest_complete)
+        self.backtest_worker.error.connect(self._on_backtest_error)
+        self.backtest_worker.start()
+
+    def _on_backtest_status(self, message: str):
+        """Handle backtest status update."""
+        self.status_label.setText(message)
+
+    def _on_backtest_complete(self, trades, metrics):
+        """Handle backtest completion - populate all tabs with trade data."""
+        trade_count = len(trades) if trades else 0
+        self.status_label.setText(f"Backtest complete: {trade_count} trades loaded")
+        self.status_label.setStyleSheet("color: #00ff00;")
+
+        if trades:
+            # Populate Trade Browser
+            self.trade_browser_tab.load_trades(trades)
+
+            # Populate Equity Curve
+            self.equity_curve_tab.load_trades(trades)
+
+            # Populate IB Analysis
+            self.ib_analysis_tab.load_trades(trades)
+
+            # Switch to Equity Curve tab to show results
+            self.tabs.setCurrentWidget(self.equity_curve_tab)
+
+    def _on_backtest_error(self, error_msg: str):
+        """Handle backtest error."""
+        self.status_label.setText(f"Backtest error: {error_msg[:100]}")
+        self.status_label.setStyleSheet("color: #ff4444;")
+        print(f"Backtest error: {error_msg}")
 
     def _show_about(self):
         """Show about dialog."""
@@ -246,48 +268,6 @@ class MainWindow(QMainWindow):
     def _on_tab_changed(self, index: int):
         """Save current tab when changed."""
         self.settings.setValue("last_tab", index)
-
-    def _load_saved_trades(self):
-        """Load saved trades on startup."""
-        trades = self.backtest_tab.load_saved_trades()
-        if trades:
-            self.trade_browser_tab.load_trades(trades)
-            self.equity_curve_tab.load_trades(trades)
-            self.ib_analysis_tab.load_trades(trades)
-            self.status_label.setText(f"Loaded {len(trades)} saved trades")
-
-    def _on_optimization_result_double_clicked(self, index):
-        """Handle double-click on optimization result to run backtest with those params."""
-        row = index.row()
-        if not hasattr(self.optimization_tab, 'top_results_data'):
-            return
-        if row >= len(self.optimization_tab.top_results_data):
-            return
-
-        result = self.optimization_tab.top_results_data[row]
-        self._run_backtest_with_params(result)
-
-    def _on_best_params_double_clicked(self, index):
-        """Handle double-click on best params to run backtest."""
-        if hasattr(self.optimization_tab, 'best_params') and self.optimization_tab.best_params:
-            self._run_backtest_with_params(self.optimization_tab.best_params)
-
-    def _run_backtest_with_params(self, params: dict):
-        """Load params into backtest tab and run."""
-        # Set ticker if available
-        ticker = self.optimization_tab.ticker_combo.currentText()
-        idx = self.backtest_tab.ticker_combo.findText(ticker)
-        if idx >= 0:
-            self.backtest_tab.ticker_combo.setCurrentIndex(idx)
-
-        # Load the parameters
-        self.backtest_tab.load_params_from_json(params)
-
-        # Switch to backtest tab and run
-        self.tabs.setCurrentWidget(self.backtest_tab)
-        self.backtest_tab._run_backtest()
-
-        self.status_label.setText(f"Running backtest with optimization params...")
 
     def closeEvent(self, event):
         """Handle window close."""

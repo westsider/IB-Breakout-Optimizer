@@ -233,7 +233,7 @@ class BacktestTab(QWidget):
         self.progress_bar.setRange(0, 0)  # Indeterminate
         self.status_label.setText("Running backtest...")
 
-        # Collect parameters
+        # Collect parameters from UI
         params = {
             'ticker': self.ticker_combo.currentText(),
             'trade_direction': self.direction_combo.currentText(),
@@ -252,6 +252,16 @@ class BacktestTab(QWidget):
             'max_bars_enabled': self.maxbars_check.isChecked(),
             'max_bars': self.maxbars_spin.value(),
         }
+
+        # Debug: print params being used for backtest
+        print(f"[DEBUG] _run_backtest: params collected from UI:")
+        print(f"[DEBUG]   ticker={params['ticker']}")
+        print(f"[DEBUG]   ib_duration_minutes={params['ib_duration_minutes']}")
+        print(f"[DEBUG]   trade_direction={params['trade_direction']}")
+        print(f"[DEBUG]   profit_target_percent={params['profit_target_percent']}")
+        print(f"[DEBUG]   min_ib_range_percent={params['min_ib_range_percent']}")
+        print(f"[DEBUG]   max_ib_range_percent={params['max_ib_range_percent']}")
+        print(f"[DEBUG]   use_qqq_filter={params['use_qqq_filter']}")
 
         # Start worker thread
         self.worker = BacktestWorker(self.data_dir, params)
@@ -344,50 +354,77 @@ class BacktestTab(QWidget):
 
     def load_params_from_json(self, params: dict):
         """Load parameters from optimization results."""
-        print(f"[DEBUG] Loading params: {params}")
+        print(f"[DEBUG] load_params_from_json called with: {params}")
+        print(f"[DEBUG] Keys in params: {list(params.keys())}")
 
         # Basic parameters
         if 'trade_direction' in params:
             idx = self.direction_combo.findText(params['trade_direction'])
+            print(f"[DEBUG] trade_direction={params['trade_direction']}, idx={idx}")
             if idx >= 0:
                 self.direction_combo.setCurrentIndex(idx)
 
         if 'profit_target_percent' in params:
+            print(f"[DEBUG] profit_target_percent={params['profit_target_percent']}")
             self.profit_target_spin.setValue(float(params['profit_target_percent']))
 
         if 'stop_loss_type' in params:
             idx = self.stop_loss_combo.findText(params['stop_loss_type'])
+            print(f"[DEBUG] stop_loss_type={params['stop_loss_type']}, idx={idx}")
             if idx >= 0:
                 self.stop_loss_combo.setCurrentIndex(idx)
 
         if 'ib_duration_minutes' in params:
-            idx = self.ib_duration_combo.findText(str(int(params['ib_duration_minutes'])))
+            val = str(int(params['ib_duration_minutes']))
+            idx = self.ib_duration_combo.findText(val)
+            print(f"[DEBUG] ib_duration_minutes={params['ib_duration_minutes']}, str_val={val}, idx={idx}")
             if idx >= 0:
                 self.ib_duration_combo.setCurrentIndex(idx)
+            else:
+                # Value not in combo (e.g., from Bayesian optimization) - add it
+                print(f"[DEBUG] Adding IB duration {val} to combo (not in standard list)")
+                self.ib_duration_combo.addItem(val)
+                self.ib_duration_combo.setCurrentText(val)
 
         # Filters
         if 'use_qqq_filter' in params:
+            print(f"[DEBUG] use_qqq_filter={params['use_qqq_filter']}")
             self.qqq_filter_check.setChecked(bool(params['use_qqq_filter']))
 
         if 'min_ib_range_percent' in params:
+            print(f"[DEBUG] min_ib_range_percent={params['min_ib_range_percent']}")
             self.min_ib_spin.setValue(float(params['min_ib_range_percent']))
 
         if 'max_ib_range_percent' in params:
+            print(f"[DEBUG] max_ib_range_percent={params['max_ib_range_percent']}")
             self.max_ib_spin.setValue(float(params['max_ib_range_percent']))
 
         if 'max_breakout_time' in params:
-            idx = self.max_breakout_combo.findText(str(params['max_breakout_time']))
+            val = str(params['max_breakout_time'])
+            idx = self.max_breakout_combo.findText(val)
+            print(f"[DEBUG] max_breakout_time={val}, idx={idx}")
             if idx >= 0:
                 self.max_breakout_combo.setCurrentIndex(idx)
+            else:
+                # Value not in combo - add it
+                self.max_breakout_combo.addItem(val)
+                self.max_breakout_combo.setCurrentText(val)
 
         if 'eod_exit_time' in params:
-            idx = self.eod_exit_combo.findText(str(params['eod_exit_time']))
+            val = str(params['eod_exit_time'])
+            idx = self.eod_exit_combo.findText(val)
+            print(f"[DEBUG] eod_exit_time={val}, idx={idx}")
             if idx >= 0:
                 self.eod_exit_combo.setCurrentIndex(idx)
+            else:
+                # Value not in combo - add it
+                self.eod_exit_combo.addItem(val)
+                self.eod_exit_combo.setCurrentText(val)
 
         # Advanced exits - trailing stop
         if 'trailing_stop_enabled' in params:
             enabled = bool(params['trailing_stop_enabled'])
+            print(f"[DEBUG] trailing_stop_enabled={enabled}")
             self.trailing_check.setChecked(enabled)
             if 'trailing_stop_atr_mult' in params:
                 self.trailing_atr_spin.setValue(float(params['trailing_stop_atr_mult']))
@@ -395,6 +432,7 @@ class BacktestTab(QWidget):
         # Advanced exits - break-even stop
         if 'break_even_enabled' in params:
             enabled = bool(params['break_even_enabled'])
+            print(f"[DEBUG] break_even_enabled={enabled}")
             self.breakeven_check.setChecked(enabled)
             if 'break_even_pct' in params:
                 self.breakeven_pct_spin.setValue(float(params['break_even_pct']))
@@ -402,9 +440,18 @@ class BacktestTab(QWidget):
         # Advanced exits - max bars
         if 'max_bars_enabled' in params:
             enabled = bool(params['max_bars_enabled'])
+            print(f"[DEBUG] max_bars_enabled={enabled}")
             self.maxbars_check.setChecked(enabled)
             if 'max_bars' in params:
                 self.maxbars_spin.setValue(int(params['max_bars']))
+
+        # Print final UI state
+        print(f"[DEBUG] FINAL UI STATE:")
+        print(f"[DEBUG]   ib_duration_combo={self.ib_duration_combo.currentText()}")
+        print(f"[DEBUG]   direction_combo={self.direction_combo.currentText()}")
+        print(f"[DEBUG]   profit_target_spin={self.profit_target_spin.value()}")
+        print(f"[DEBUG]   min_ib_spin={self.min_ib_spin.value()}")
+        print(f"[DEBUG]   max_ib_spin={self.max_ib_spin.value()}")
 
     def _get_trades_file_path(self) -> Path:
         """Get path to saved trades file."""
