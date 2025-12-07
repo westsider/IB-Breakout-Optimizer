@@ -8,7 +8,7 @@ This file provides context and guidance for Claude Code when working with this p
 
 **Purpose**: Custom Python backtester with continuous learning/self-optimization for the IB (Initial Balance) Breakout trading strategy. Optimized parameters are exported to NinjaTrader for live trading.
 
-**Status**: Phase 6 in progress - ML Filter module complete with training UI. Ready for ML integration into optimizer.
+**Status**: Phase 6 complete - ML Filter with ensemble models, insights generator, and optimizer integration.
 
 ---
 
@@ -107,7 +107,7 @@ This file provides context and guidance for Claude Code when working with this p
 - Active alerts table with acknowledge function
 - Data update status and controls
 
-#### Phase 6: ML Filter (In Progress)
+#### Phase 6: ML Filter (Complete)
 
 **ML Filter Module** (`ml_filter/`)
 - `feature_builder.py` - Extract ML features from backtest trades
@@ -119,23 +119,33 @@ This file provides context and guidance for Claude Code when working with this p
   - Trade direction (long/short)
   - QQQ confirmation status
   - Distance from IB at entry
-- `model_trainer.py` - LightGBM classifier for win/loss prediction
-  - Cross-validation training (5-fold)
+  - Strategy parameters (profit target, stop type, trailing/break-even)
+- `model_trainer.py` - ML classifiers for win/loss prediction
+  - **Ensemble model**: LightGBM + Random Forest + Logistic Regression (40/40/20 weights)
+  - Reduced LightGBM complexity to prevent overfitting (`num_leaves=15`, `max_depth=4`)
+  - **TimeSeriesSplit** cross-validation (preserves temporal order)
   - Model metrics: accuracy, precision, recall, F1, ROC AUC
   - Feature importance analysis
-  - Model persistence (save/load pickle files)
+  - **Insights generator**: actionable recommendations based on data analysis
+    - Day of week win rate analysis
+    - IB range impact (narrow/wide IB days)
+    - Gap direction effects
+    - Entry hour patterns
+    - Prior days trend impact
+  - Model persistence (save/load pickle files with ensemble support)
 
 **ML Filter Tab** in Desktop App
 - Ticker and parameter selection
+- **Model type dropdown**: Ensemble or LightGBM only
+- **Probability threshold slider** (0.50 - 0.70)
 - One-click training (runs backtest → extracts features → trains model)
-- Model performance metrics display
+- Model performance metrics with **tooltips explaining each metric**
+- **Confusion matrix with color coding and explanations** (TN/FP/FN/TP)
 - Feature importance bar chart
+- **Insights panel** showing actionable ML recommendations
+- **"Train from Best" button**: trains using best params from optimization
+- **Optimizer integration**: best results auto-populate ML tab when optimization completes
 - Save/load trained models
-
-**Pending ML Integration**
-- Integrate ML filter into mmap optimizer
-- Add ML filter controls to Optimization tab
-- Probability threshold filtering
 
 ### Pending Phases
 

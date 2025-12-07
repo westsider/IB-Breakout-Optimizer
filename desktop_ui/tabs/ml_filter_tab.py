@@ -3,10 +3,12 @@ ML Filter Tab - Train and evaluate ML trade filter models.
 
 Features:
 - Run backtest to generate training data
-- Train LightGBM classifier
+- Train LightGBM or Ensemble classifier
 - View model metrics (accuracy, precision, recall, ROC AUC)
 - View feature importance chart
+- View ML insights and recommendations
 - Save/load trained models
+- Integration with optimization results
 """
 
 from PySide6.QtWidgets import (
@@ -14,14 +16,50 @@ from PySide6.QtWidgets import (
     QLabel, QComboBox, QPushButton, QGroupBox,
     QTableWidget, QTableWidgetItem, QHeaderView, QProgressBar,
     QSplitter, QFrame, QSpinBox, QDoubleSpinBox, QFileDialog,
-    QMessageBox
+    QMessageBox, QSlider, QTextEdit, QToolTip
 )
 from PySide6.QtCore import Qt, Signal, QThread
 from PySide6.QtWebEngineWidgets import QWebEngineView
+from PySide6.QtGui import QFont
 
 from desktop_ui.widgets.metrics_panel import MetricCard
 from pathlib import Path
 import numpy as np
+
+
+# Metric definitions for tooltips
+METRIC_TOOLTIPS = {
+    'accuracy': (
+        "Accuracy: % of all predictions that were correct.\n"
+        "Formula: (TP + TN) / Total\n"
+        "Note: Can be misleading with imbalanced data."
+    ),
+    'precision': (
+        "Precision: When model predicts WIN, how often is it right?\n"
+        "Formula: TP / (TP + FP)\n"
+        "High precision = fewer false alarms (costly bad trades)."
+    ),
+    'recall': (
+        "Recall: Of all actual wins, how many did the model catch?\n"
+        "Formula: TP / (TP + FN)\n"
+        "High recall = fewer missed opportunities."
+    ),
+    'f1': (
+        "F1 Score: Balance between precision and recall (0-1).\n"
+        "Formula: 2 * (Precision * Recall) / (Precision + Recall)\n"
+        "Use when you need balance between false alarms and missed trades."
+    ),
+    'roc_auc': (
+        "ROC AUC: Model's ability to distinguish wins from losses.\n"
+        "Range: 0.5 (random) to 1.0 (perfect)\n"
+        "Values 0.6-0.7 are decent, >0.7 is good for trading."
+    ),
+    'cv_mean': (
+        "CV Mean: Average accuracy across 5 time-based validation folds.\n"
+        "Uses TimeSeriesSplit to preserve temporal order.\n"
+        "Lower than train accuracy indicates some overfitting."
+    )
+}
 
 
 class TrainingWorker(QThread):
@@ -31,11 +69,14 @@ class TrainingWorker(QThread):
     finished = Signal(dict)  # results dict
     error = Signal(str)
 
-    def __init__(self, data_dir: str, ticker: str, params: dict):
+    def __init__(self, data_dir: str, ticker: str, params: dict,
+                 use_ensemble: bool = True, threshold: float = 0.55):
         super().__init__()
         self.data_dir = data_dir
         self.ticker = ticker
         self.params = params
+        self.use_ensemble = use_ensemble
+        self.threshold = threshold
 
     def run(self):
         """Run training in background thread."""
@@ -127,20 +168,30 @@ class TrainingWorker(QThread):
                 }
                 trade_dicts.append(trade_dict)
 
+            # Build strategy params dict for feature extraction
+            strategy_params_for_features = {
+                'profit_target_percent': self.params.get('profit_target', 1.0),
+                'stop_loss_type': self.params.get('stop_loss_type', 'opposite_ib'),
+                'trailing_stop_enabled': self.params.get('trailing_stop_enabled', False),
+                'break_even_enabled': self.params.get('break_even_enabled', False),
+            }
+
             features_df = feature_builder.build_features_from_backtest(
                 trade_dicts, bars_array, timestamps,
                 ib_duration_minutes=self.params.get('ib_duration', 30),
-                qqq_filter_used=self.params.get('use_qqq_filter', False)
+                qqq_filter_used=use_qqq,
+                strategy_params=strategy_params_for_features
             )
 
             if len(features_df) < 20:
                 self.error.emit(f"Could not extract enough features: {len(features_df)} samples")
                 return
 
-            self.progress.emit(f"Training ML model on {len(features_df)} samples...")
+            model_type = "ensemble" if self.use_ensemble else "LightGBM"
+            self.progress.emit(f"Training {model_type} model on {len(features_df)} samples...")
 
             # Step 4: Train model
-            ml_filter = MLTradeFilter()
+            ml_filter = MLTradeFilter(use_ensemble=self.use_ensemble)
             result = ml_filter.train(features_df, ticker=self.ticker)
 
             self.progress.emit("Training complete!")
@@ -150,7 +201,9 @@ class TrainingWorker(QThread):
                 'ml_filter': ml_filter,
                 'training_result': result,
                 'n_trades': len(trades),
-                'n_samples': len(features_df)
+                'n_samples': len(features_df),
+                'features_df': features_df,
+                'threshold': self.threshold
             })
 
         except Exception as e:
@@ -170,6 +223,8 @@ class MLFilterTab(QWidget):
         self.output_dir = output_dir
         self.worker = None
         self.current_model = None
+        self.optimizer_params = None  # Params from optimization tab
+        self.features_df = None  # Store for insights
 
         self._setup_ui()
 
@@ -218,17 +273,34 @@ class MLFilterTab(QWidget):
         self.profit_target_spin.setSuffix("%")
         train_layout.addWidget(self.profit_target_spin, 0, 1)
 
-        train_layout.addWidget(QLabel("Prior Days:"), 1, 0)
-        self.prior_days_spin = QSpinBox()
-        self.prior_days_spin.setRange(1, 10)
-        self.prior_days_spin.setValue(3)
-        train_layout.addWidget(self.prior_days_spin, 1, 1)
+        train_layout.addWidget(QLabel("Model Type:"), 1, 0)
+        self.model_type_combo = QComboBox()
+        self.model_type_combo.addItems(["Ensemble", "LightGBM"])
+        self.model_type_combo.setToolTip(
+            "Ensemble: LightGBM + Random Forest + Logistic Regression (more robust)\n"
+            "LightGBM: Single model (faster, simpler)"
+        )
+        train_layout.addWidget(self.model_type_combo, 1, 1)
 
-        train_layout.addWidget(QLabel("Range Days:"), 2, 0)
-        self.range_days_spin = QSpinBox()
-        self.range_days_spin.setRange(1, 20)
-        self.range_days_spin.setValue(5)
-        train_layout.addWidget(self.range_days_spin, 2, 1)
+        # Probability threshold slider
+        train_layout.addWidget(QLabel("Threshold:"), 2, 0)
+        threshold_layout = QHBoxLayout()
+        self.threshold_slider = QSlider(Qt.Horizontal)
+        self.threshold_slider.setRange(50, 70)  # 0.50 to 0.70
+        self.threshold_slider.setValue(55)  # Default 0.55
+        self.threshold_slider.setTickPosition(QSlider.TicksBelow)
+        self.threshold_slider.setTickInterval(5)
+        self.threshold_slider.valueChanged.connect(self._on_threshold_changed)
+        threshold_layout.addWidget(self.threshold_slider)
+        self.threshold_label = QLabel("0.55")
+        self.threshold_label.setMinimumWidth(35)
+        self.threshold_label.setToolTip(
+            "Probability threshold for filtering trades.\n"
+            "Higher = more selective (fewer trades, higher precision)\n"
+            "Lower = more trades but may include weaker signals"
+        )
+        threshold_layout.addWidget(self.threshold_label)
+        train_layout.addLayout(threshold_layout, 2, 1)
 
         top_layout.addWidget(train_group)
 
@@ -240,6 +312,15 @@ class MLFilterTab(QWidget):
         self.train_button.setObjectName("primary")
         self.train_button.clicked.connect(self._train_model)
         actions_layout.addWidget(self.train_button)
+
+        self.train_from_best_button = QPushButton("Train from Best")
+        self.train_from_best_button.setToolTip(
+            "Train using best parameters from optimization.\n"
+            "Run optimization first, then click this button."
+        )
+        self.train_from_best_button.setEnabled(False)
+        self.train_from_best_button.clicked.connect(self._train_from_optimizer)
+        actions_layout.addWidget(self.train_from_best_button)
 
         self.save_button = QPushButton("Save Model")
         self.save_button.setEnabled(False)
@@ -253,6 +334,24 @@ class MLFilterTab(QWidget):
         top_layout.addWidget(actions_group)
 
         layout.addLayout(top_layout)
+
+        # Optimizer params display (shows when params received from optimization)
+        self.optimizer_params_frame = QFrame()
+        self.optimizer_params_frame.setStyleSheet("""
+            QFrame {
+                background-color: #1a3a1a;
+                border: 1px solid #2d5a2d;
+                border-radius: 6px;
+                padding: 8px;
+            }
+        """)
+        optimizer_params_layout = QHBoxLayout(self.optimizer_params_frame)
+        optimizer_params_layout.setContentsMargins(8, 4, 8, 4)
+        self.optimizer_params_label = QLabel("")
+        self.optimizer_params_label.setStyleSheet("color: #88ff88;")
+        optimizer_params_layout.addWidget(self.optimizer_params_label)
+        self.optimizer_params_frame.setVisible(False)
+        layout.addWidget(self.optimizer_params_frame)
 
         # Status bar
         status_frame = QFrame()
@@ -285,33 +384,47 @@ class MLFilterTab(QWidget):
         metrics_label.setStyleSheet("font-weight: bold; font-size: 14px;")
         metrics_layout.addWidget(metrics_label)
 
-        # Metric cards grid
+        # Metric cards grid with tooltips
         cards_grid = QGridLayout()
         cards_grid.setSpacing(8)
 
-        self.accuracy_card = MetricCard("Accuracy")
+        self.accuracy_card = MetricCard("Accuracy (?)")
+        self.accuracy_card.setToolTip(METRIC_TOOLTIPS['accuracy'])
         cards_grid.addWidget(self.accuracy_card, 0, 0)
 
-        self.precision_card = MetricCard("Precision")
+        self.precision_card = MetricCard("Precision (?)")
+        self.precision_card.setToolTip(METRIC_TOOLTIPS['precision'])
         cards_grid.addWidget(self.precision_card, 0, 1)
 
-        self.recall_card = MetricCard("Recall")
+        self.recall_card = MetricCard("Recall (?)")
+        self.recall_card.setToolTip(METRIC_TOOLTIPS['recall'])
         cards_grid.addWidget(self.recall_card, 1, 0)
 
-        self.f1_card = MetricCard("F1 Score")
+        self.f1_card = MetricCard("F1 Score (?)")
+        self.f1_card.setToolTip(METRIC_TOOLTIPS['f1'])
         cards_grid.addWidget(self.f1_card, 1, 1)
 
-        self.auc_card = MetricCard("ROC AUC")
+        self.auc_card = MetricCard("ROC AUC (?)")
+        self.auc_card.setToolTip(METRIC_TOOLTIPS['roc_auc'])
         cards_grid.addWidget(self.auc_card, 2, 0)
 
-        self.cv_card = MetricCard("CV Mean")
+        self.cv_card = MetricCard("CV Mean (?)")
+        self.cv_card.setToolTip(METRIC_TOOLTIPS['cv_mean'])
         cards_grid.addWidget(self.cv_card, 2, 1)
 
         metrics_layout.addLayout(cards_grid)
 
-        # Confusion matrix display
-        cm_label = QLabel("Confusion Matrix")
+        # Confusion matrix display with explanation
+        cm_label = QLabel("Confusion Matrix (?)")
         cm_label.setStyleSheet("font-weight: bold; margin-top: 12px;")
+        cm_label.setToolTip(
+            "Confusion Matrix Explained:\n\n"
+            "TN (Pred Loss, Actual Loss) = Correctly avoided losing trade (GREEN)\n"
+            "FP (Pred Win, Actual Loss) = Took trade expecting win, got loss - COSTLY! (RED)\n"
+            "FN (Pred Loss, Actual Win) = Skipped trade that would have won - opportunity cost (YELLOW)\n"
+            "TP (Pred Win, Actual Win) = Correctly took winning trade (GREEN)\n\n"
+            "For trading, minimizing FP (false positives) is critical - these are costly bad trades."
+        )
         metrics_layout.addWidget(cm_label)
 
         self.cm_table = QTableWidget(2, 2)
@@ -319,7 +432,27 @@ class MLFilterTab(QWidget):
         self.cm_table.setVerticalHeaderLabels(["Actual Loss", "Actual Win"])
         self.cm_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.cm_table.verticalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.cm_table.setMaximumHeight(100)
+        self.cm_table.setMinimumHeight(120)
+        self.cm_table.setMaximumHeight(150)
+        self.cm_table.setStyleSheet("""
+            QTableWidget {
+                background-color: #252525;
+                gridline-color: #444444;
+                font-size: 14px;
+                font-weight: bold;
+            }
+            QTableWidget::item {
+                padding: 8px;
+                text-align: center;
+            }
+            QHeaderView::section {
+                background-color: #333333;
+                color: #cccccc;
+                padding: 6px;
+                border: 1px solid #444444;
+                font-weight: bold;
+            }
+        """)
         metrics_layout.addWidget(self.cm_table)
 
         # Training info
@@ -331,7 +464,10 @@ class MLFilterTab(QWidget):
 
         results_splitter.addWidget(metrics_frame)
 
-        # Right: Feature importance chart
+        # Right side: Feature importance chart + Insights panel (vertical split)
+        right_splitter = QSplitter(Qt.Vertical)
+
+        # Feature importance chart
         chart_frame = QFrame()
         chart_frame.setStyleSheet("""
             QFrame {
@@ -351,7 +487,46 @@ class MLFilterTab(QWidget):
         self.importance_chart.setStyleSheet("background-color: #1e1e1e;")
         chart_layout.addWidget(self.importance_chart)
 
-        results_splitter.addWidget(chart_frame)
+        right_splitter.addWidget(chart_frame)
+
+        # Insights panel
+        insights_frame = QFrame()
+        insights_frame.setStyleSheet("""
+            QFrame {
+                border: 1px solid #333333;
+                border-radius: 4px;
+                background-color: #1e1e1e;
+            }
+        """)
+        insights_layout = QVBoxLayout(insights_frame)
+        insights_layout.setContentsMargins(8, 8, 8, 8)
+
+        insights_header = QLabel("ML Insights & Recommendations")
+        insights_header.setStyleSheet("font-weight: bold; font-size: 14px; color: #ffcc00;")
+        insights_layout.addWidget(insights_header)
+
+        self.insights_text = QTextEdit()
+        self.insights_text.setReadOnly(True)
+        self.insights_text.setStyleSheet("""
+            QTextEdit {
+                background-color: #252525;
+                color: #cccccc;
+                border: 1px solid #444444;
+                border-radius: 4px;
+                padding: 8px;
+                font-size: 12px;
+            }
+        """)
+        self.insights_text.setPlaceholderText(
+            "Train a model to see insights and recommendations based on the data."
+        )
+        self.insights_text.setMinimumHeight(100)
+        insights_layout.addWidget(self.insights_text)
+
+        right_splitter.addWidget(insights_frame)
+        right_splitter.setSizes([350, 150])
+
+        results_splitter.addWidget(right_splitter)
         results_splitter.setSizes([300, 500])
 
         layout.addWidget(results_splitter, 1)
@@ -367,6 +542,7 @@ class MLFilterTab(QWidget):
     def _train_model(self):
         """Start model training."""
         self.train_button.setEnabled(False)
+        self.train_from_best_button.setEnabled(False)
         self.status_label.setText("Starting training...")
         self.status_label.setStyleSheet("color: #2a82da;")
 
@@ -378,19 +554,59 @@ class MLFilterTab(QWidget):
             'profit_target': self.profit_target_spin.value(),
             'direction': self.direction_combo.currentText(),
             'use_qqq_filter': False,  # Could add checkbox for this
-            'prior_days_lookback': self.prior_days_spin.value(),
-            'daily_range_lookback': self.range_days_spin.value()
+            'prior_days_lookback': 3,
+            'daily_range_lookback': 5
         }
+
+        use_ensemble = self.model_type_combo.currentText() == "Ensemble"
+        threshold = self.threshold_slider.value() / 100.0
 
         self.worker = TrainingWorker(
             self.data_dir,
             self.ticker_combo.currentText(),
-            params
+            params,
+            use_ensemble=use_ensemble,
+            threshold=threshold
         )
         self.worker.progress.connect(self._on_progress)
         self.worker.finished.connect(self._on_finished)
         self.worker.error.connect(self._on_error)
         self.worker.start()
+
+    def _train_from_optimizer(self):
+        """Train using best parameters from optimization."""
+        if self.optimizer_params is None:
+            QMessageBox.warning(
+                self, "No Optimizer Results",
+                "Run optimization first to get best parameters.\n"
+                "Go to the Optimization tab and run an optimization, "
+                "then return here to train from those results."
+            )
+            return
+
+        # Apply optimizer params to UI
+        ticker = self.optimizer_params.get('ticker', 'TSLA')
+        idx = self.ticker_combo.findText(ticker)
+        if idx >= 0:
+            self.ticker_combo.setCurrentIndex(idx)
+
+        ib_duration = self.optimizer_params.get('ib_duration_minutes', 30)
+        self.ib_duration_spin.setValue(ib_duration)
+
+        direction = self.optimizer_params.get('trade_direction', 'both')
+        idx = self.direction_combo.findText(direction)
+        if idx >= 0:
+            self.direction_combo.setCurrentIndex(idx)
+
+        profit_target = self.optimizer_params.get('profit_target_percent', 1.0)
+        self.profit_target_spin.setValue(profit_target)
+
+        # Now train with these params
+        self._train_model()
+
+    def _on_threshold_changed(self, value: int):
+        """Update threshold label when slider changes."""
+        self.threshold_label.setText(f"{value / 100:.2f}")
 
     def _on_progress(self, message: str):
         """Handle progress update."""
@@ -400,13 +616,18 @@ class MLFilterTab(QWidget):
         """Handle training completion."""
         self.train_button.setEnabled(True)
         self.save_button.setEnabled(True)
+        if self.optimizer_params:
+            self.train_from_best_button.setEnabled(True)
 
         self.current_model = results['ml_filter']
         training_result = results['training_result']
+        self.features_df = results.get('features_df')
 
+        # Show model type in status
+        model_type = getattr(training_result, 'model_type', 'lightgbm')
         self.status_label.setText(
             f"Training complete! {results['n_samples']} samples, "
-            f"{training_result.accuracy:.1%} accuracy"
+            f"{training_result.accuracy:.1%} accuracy ({model_type})"
         )
         self.status_label.setStyleSheet("color: #00ff00;")
 
@@ -415,6 +636,9 @@ class MLFilterTab(QWidget):
 
         # Update feature importance chart
         self._update_importance_chart(training_result.feature_importance)
+
+        # Update insights panel
+        self._update_insights(training_result)
 
         # Update info label
         self.info_label.setText(
@@ -429,6 +653,8 @@ class MLFilterTab(QWidget):
     def _on_error(self, error_msg: str):
         """Handle training error."""
         self.train_button.setEnabled(True)
+        if self.optimizer_params:
+            self.train_from_best_button.setEnabled(True)
         self.status_label.setText(f"Error: {error_msg[:100]}")
         self.status_label.setStyleSheet("color: #ff4444;")
 
@@ -444,6 +670,7 @@ class MLFilterTab(QWidget):
 
         self.info_label.setText("")
         self.importance_chart.setHtml("")
+        self.insights_text.clear()
 
     def _update_metrics(self, result):
         """Update metric cards with training results."""
@@ -481,12 +708,32 @@ class MLFilterTab(QWidget):
             get_color(result.cv_mean)
         )
 
-        # Update confusion matrix
+        # Update confusion matrix with color coding
         cm = result.confusion_matrix
-        self.cm_table.setItem(0, 0, QTableWidgetItem(str(cm[0, 0])))  # TN
-        self.cm_table.setItem(0, 1, QTableWidgetItem(str(cm[0, 1])))  # FP
-        self.cm_table.setItem(1, 0, QTableWidgetItem(str(cm[1, 0])))  # FN
-        self.cm_table.setItem(1, 1, QTableWidgetItem(str(cm[1, 1])))  # TP
+
+        # TN (True Negative) - Correctly predicted loss - green
+        tn_item = QTableWidgetItem(str(cm[0, 0]))
+        tn_item.setTextAlignment(Qt.AlignCenter)
+        tn_item.setBackground(Qt.darkGreen)
+        self.cm_table.setItem(0, 0, tn_item)
+
+        # FP (False Positive) - Predicted win but was loss - red
+        fp_item = QTableWidgetItem(str(cm[0, 1]))
+        fp_item.setTextAlignment(Qt.AlignCenter)
+        fp_item.setBackground(Qt.darkRed)
+        self.cm_table.setItem(0, 1, fp_item)
+
+        # FN (False Negative) - Predicted loss but was win - orange/yellow
+        fn_item = QTableWidgetItem(str(cm[1, 0]))
+        fn_item.setTextAlignment(Qt.AlignCenter)
+        fn_item.setBackground(Qt.darkYellow)
+        self.cm_table.setItem(1, 0, fn_item)
+
+        # TP (True Positive) - Correctly predicted win - green
+        tp_item = QTableWidgetItem(str(cm[1, 1]))
+        tp_item.setTextAlignment(Qt.AlignCenter)
+        tp_item.setBackground(Qt.darkGreen)
+        self.cm_table.setItem(1, 1, tp_item)
 
     def _update_importance_chart(self, importance: dict):
         """Update feature importance bar chart."""
@@ -526,6 +773,54 @@ class MLFilterTab(QWidget):
         html = fig.to_html(include_plotlyjs='cdn', full_html=True)
         html = html.replace('<body>', '<body style="background-color: #1e1e1e; margin: 0;">')
         self.importance_chart.setHtml(html)
+
+    def _update_insights(self, training_result):
+        """Update insights panel with actionable recommendations."""
+        insights = getattr(training_result, 'insights', None)
+
+        if not insights:
+            self.insights_text.setPlainText(
+                "No insights available. The model may need more data to generate recommendations."
+            )
+            return
+
+        # Format insights with bullet points
+        formatted = []
+        for insight in insights:
+            formatted.append(f"• {insight}")
+
+        self.insights_text.setPlainText("\n\n".join(formatted))
+
+    def set_optimizer_params(self, params: dict, ticker: str):
+        """
+        Receive best parameters from optimization tab.
+
+        This is called by main_window when optimization completes.
+        Enables the 'Train from Best' button and shows params.
+        """
+        self.optimizer_params = params.copy()
+        self.optimizer_params['ticker'] = ticker
+
+        # Show optimizer params in the UI
+        ib_dur = params.get('ib_duration_minutes', 30)
+        direction = params.get('trade_direction', 'both')
+        target = params.get('profit_target_percent', 1.0)
+        win_rate = params.get('win_rate', 0)
+
+        self.optimizer_params_label.setText(
+            f"Params from optimization: {ticker}, {ib_dur}min IB, "
+            f"{direction}, {target:.1f}% target, {win_rate:.0%} win rate"
+        )
+        self.optimizer_params_frame.setVisible(True)
+
+        # Enable the Train from Best button
+        self.train_from_best_button.setEnabled(True)
+
+        # Update status
+        self.status_label.setText(
+            f"Optimization results received. Click 'Train from Best' to train ML model."
+        )
+        self.status_label.setStyleSheet("color: #88ff88;")
 
     def _save_model(self):
         """Save trained model to file."""

@@ -186,6 +186,7 @@ class MainWindow(QMainWindow):
             self.download_tab.set_data_dir(directory)
             self.trade_browser_tab.set_data_dir(directory)
             self.monitoring_tab.set_data_dir(directory)
+            self.ml_filter_tab.set_data_dir(directory)
 
             self.status_label.setText(f"Data directory set to: {directory}")
 
@@ -202,6 +203,7 @@ class MainWindow(QMainWindow):
 
             # Update tabs
             self.optimization_tab.set_output_dir(directory)
+            self.ml_filter_tab.set_output_dir(directory)
 
             self.status_label.setText(f"Output directory set to: {directory}")
 
@@ -210,6 +212,18 @@ class MainWindow(QMainWindow):
         self.status_label.setText(
             f"Optimization complete: {results.get('completed', 0)} combinations tested"
         )
+
+        # Send best result to ML Filter tab for training
+        best_result = results.get('best_result')
+        ticker = results.get('ticker', 'TSLA')
+
+        if best_result:
+            # Extract params from the best result
+            best_params = best_result.get('params', {})
+            best_params['win_rate'] = best_result.get('win_rate', 0)
+
+            # Send to ML tab
+            self.ml_filter_tab.set_optimizer_params(best_params, ticker)
 
     def _on_result_double_clicked(self, params: dict, ticker: str):
         """Handle double-click on optimization result - run full backtest."""

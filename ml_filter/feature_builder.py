@@ -9,6 +9,7 @@ Features include:
 - Time-based features (hour, day of week)
 - Trade direction
 - QQQ confirmation status
+- Strategy parameters (profit target, stop type, etc.)
 """
 
 import numpy as np
@@ -51,6 +52,14 @@ class TradeFeatures:
     # Distance from IB level at entry
     distance_from_ib_percent: float  # How far past IB level when entering
 
+    # Strategy parameters (NEW)
+    profit_target_percent: float  # Target as % of entry price
+    stop_type_opposite_ib: bool  # Stop at opposite IB level
+    stop_type_fixed: bool  # Fixed percentage stop
+    stop_type_atr: bool  # ATR-based stop
+    trailing_stop_enabled: bool
+    break_even_enabled: bool
+
     # Target
     is_winner: bool  # True if trade was profitable
     pnl: float  # Actual P&L
@@ -72,6 +81,14 @@ class TradeFeatures:
             'is_short': int(self.is_short),
             'qqq_confirmed': int(self.qqq_confirmed),
             'distance_from_ib_percent': self.distance_from_ib_percent,
+            # Strategy parameters
+            'profit_target_percent': self.profit_target_percent,
+            'stop_type_opposite_ib': int(self.stop_type_opposite_ib),
+            'stop_type_fixed': int(self.stop_type_fixed),
+            'stop_type_atr': int(self.stop_type_atr),
+            'trailing_stop_enabled': int(self.trailing_stop_enabled),
+            'break_even_enabled': int(self.break_even_enabled),
+            # Target
             'is_winner': int(self.is_winner),
             'pnl': self.pnl
         }
@@ -86,6 +103,7 @@ class FeatureBuilder:
 
     # Feature columns used for training (excludes target and metadata)
     FEATURE_COLUMNS = [
+        # Market condition features
         'ib_range_percent',
         'ib_duration_minutes',
         'gap_percent',
@@ -98,7 +116,14 @@ class FeatureBuilder:
         'is_long',
         'is_short',
         'qqq_confirmed',
-        'distance_from_ib_percent'
+        'distance_from_ib_percent',
+        # Strategy parameter features
+        'profit_target_percent',
+        'stop_type_opposite_ib',
+        'stop_type_fixed',
+        'stop_type_atr',
+        'trailing_stop_enabled',
+        'break_even_enabled',
     ]
 
     TARGET_COLUMN = 'is_winner'
@@ -120,7 +145,8 @@ class FeatureBuilder:
         bars: np.ndarray,
         timestamps: np.ndarray,
         ib_duration_minutes: int = 30,
-        qqq_filter_used: bool = False
+        qqq_filter_used: bool = False,
+        strategy_params: Optional[Dict[str, Any]] = None
     ) -> pd.DataFrame:
         """
         Build feature DataFrame from backtest trades.
@@ -131,6 +157,11 @@ class FeatureBuilder:
             timestamps: Timestamps for each bar
             ib_duration_minutes: IB window size used
             qqq_filter_used: Whether QQQ filter was enabled
+            strategy_params: Strategy parameters used for the backtest (optional)
+                - profit_target_percent: float
+                - stop_loss_type: str ('opposite_ib', 'fixed_percent', 'atr')
+                - trailing_stop_enabled: bool
+                - break_even_enabled: bool
 
         Returns:
             DataFrame with features for each trade
@@ -138,13 +169,17 @@ class FeatureBuilder:
         # First, compute daily OHLC from minute bars
         daily_data = self._compute_daily_ohlc(bars, timestamps)
 
+        # Default strategy params if not provided
+        if strategy_params is None:
+            strategy_params = {}
+
         features_list = []
 
         for trade in trades:
             try:
                 features = self._extract_trade_features(
                     trade, bars, timestamps, daily_data,
-                    ib_duration_minutes, qqq_filter_used
+                    ib_duration_minutes, qqq_filter_used, strategy_params
                 )
                 if features is not None:
                     features_list.append(features.to_dict())
@@ -204,7 +239,8 @@ class FeatureBuilder:
         timestamps: np.ndarray,
         daily_data: Dict[str, Dict[str, float]],
         ib_duration_minutes: int,
-        qqq_filter_used: bool
+        qqq_filter_used: bool,
+        strategy_params: Dict[str, Any]
     ) -> Optional[TradeFeatures]:
         """Extract features for a single trade."""
 
@@ -295,6 +331,15 @@ class FeatureBuilder:
         else:
             distance_from_ib = 0
 
+        # Strategy parameters
+        profit_target = strategy_params.get('profit_target_percent', 1.0)
+        stop_type = strategy_params.get('stop_loss_type', 'opposite_ib')
+        stop_type_opposite_ib = stop_type == 'opposite_ib'
+        stop_type_fixed = stop_type == 'fixed_percent'
+        stop_type_atr = stop_type == 'atr'
+        trailing_stop_enabled = strategy_params.get('trailing_stop_enabled', False)
+        break_even_enabled = strategy_params.get('break_even_enabled', False)
+
         # Trade outcome
         pnl = trade.get('pnl', trade.get('profit', 0))
         is_winner = pnl > 0
@@ -314,6 +359,12 @@ class FeatureBuilder:
             is_short=is_short,
             qqq_confirmed=qqq_filter_used,
             distance_from_ib_percent=distance_from_ib,
+            profit_target_percent=profit_target,
+            stop_type_opposite_ib=stop_type_opposite_ib,
+            stop_type_fixed=stop_type_fixed,
+            stop_type_atr=stop_type_atr,
+            trailing_stop_enabled=trailing_stop_enabled,
+            break_even_enabled=break_even_enabled,
             is_winner=is_winner,
             pnl=pnl
         )

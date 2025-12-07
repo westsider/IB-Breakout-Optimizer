@@ -1,9 +1,11 @@
 """
-ML Trade Filter - LightGBM classifier for predicting trade outcomes.
+ML Trade Filter - Ensemble classifier for predicting trade outcomes.
 
 This module provides:
-- Model training with cross-validation
+- Ensemble model training (LightGBM + Random Forest + Logistic Regression)
+- Time-series cross-validation for proper temporal validation
 - Feature importance analysis
+- Actionable insights generation
 - Model persistence (save/load)
 - Prediction interface for the optimizer
 """
@@ -18,7 +20,9 @@ from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime
 
 import lightgbm as lgb
-from sklearn.model_selection import cross_val_score, train_test_split
+from sklearn.model_selection import cross_val_score, train_test_split, TimeSeriesSplit
+from sklearn.ensemble import RandomForestClassifier, VotingClassifier
+from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
     accuracy_score, precision_score, recall_score, f1_score,
     roc_auc_score, confusion_matrix, classification_report
@@ -44,6 +48,8 @@ class TrainingResult:
     n_winners: int
     n_losers: int
     train_date: str
+    insights: List[str] = field(default_factory=list)  # Actionable recommendations
+    model_type: str = "lightgbm"  # lightgbm or ensemble
 
     def summary(self) -> str:
         """Get summary string of results."""
@@ -98,17 +104,23 @@ class TrainingResult:
             'n_samples': self.n_samples,
             'n_winners': self.n_winners,
             'n_losers': self.n_losers,
-            'train_date': self.train_date
+            'train_date': self.train_date,
+            'insights': self.insights,
+            'model_type': self.model_type
         }
 
 
 class MLTradeFilter:
     """
-    LightGBM-based trade filter for predicting win/loss outcomes.
+    Ensemble-based trade filter for predicting win/loss outcomes.
+
+    Supports:
+    - Single LightGBM model (faster, simpler)
+    - Ensemble of LightGBM + Random Forest + Logistic Regression (more robust)
 
     Usage:
-        # Training
-        filter = MLTradeFilter()
+        # Training with ensemble
+        filter = MLTradeFilter(use_ensemble=True)
         result = filter.train(features_df)
         filter.save('models/tsla_filter.pkl')
 
@@ -117,34 +129,61 @@ class MLTradeFilter:
         probability = filter.predict_proba(features)
     """
 
+    # Reduced complexity params to prevent overfitting on small datasets
     DEFAULT_PARAMS = {
         'objective': 'binary',
         'metric': 'auc',
         'boosting_type': 'gbdt',
-        'num_leaves': 31,
+        'num_leaves': 15,           # Reduced from 31
+        'max_depth': 4,             # Added depth limit
         'learning_rate': 0.05,
-        'feature_fraction': 0.8,
-        'bagging_fraction': 0.8,
+        'feature_fraction': 0.7,    # Reduced from 0.8
+        'bagging_fraction': 0.7,    # Reduced from 0.8
         'bagging_freq': 5,
+        'min_child_samples': 20,    # Prevent overfitting
+        'reg_alpha': 0.1,           # L1 regularization
+        'reg_lambda': 1.0,          # L2 regularization
         'verbose': -1,
-        'n_estimators': 100,
+        'n_estimators': 50,         # Reduced from 100
         'random_state': 42
     }
 
-    def __init__(self, params: Optional[Dict[str, Any]] = None):
+    # Random Forest params for ensemble
+    RF_PARAMS = {
+        'n_estimators': 100,
+        'max_depth': 6,
+        'min_samples_leaf': 10,
+        'min_samples_split': 20,
+        'class_weight': 'balanced',
+        'random_state': 42,
+        'n_jobs': -1
+    }
+
+    # Ensemble weights
+    ENSEMBLE_WEIGHTS = {
+        'lightgbm': 0.4,
+        'random_forest': 0.4,
+        'logistic': 0.2
+    }
+
+    def __init__(self, params: Optional[Dict[str, Any]] = None, use_ensemble: bool = False):
         """
         Initialize ML trade filter.
 
         Args:
             params: LightGBM parameters (uses defaults if not provided)
+            use_ensemble: If True, use ensemble of models (more robust)
         """
         self.params = {**self.DEFAULT_PARAMS, **(params or {})}
-        self.model: Optional[lgb.LGBMClassifier] = None
+        self.use_ensemble = use_ensemble
+        self.model = None  # Can be LGBMClassifier or VotingClassifier
+        self.lgb_model: Optional[lgb.LGBMClassifier] = None  # Keep reference for feature importance
         self.feature_builder = FeatureBuilder()
         self.feature_names: List[str] = []
         self.training_result: Optional[TrainingResult] = None
         self.ticker: str = ""
         self.train_date: str = ""
+        self.features_df: Optional[pd.DataFrame] = None  # Store for insights
 
     def train(
         self,
@@ -163,11 +202,12 @@ class MLTradeFilter:
             cv_folds: Number of cross-validation folds
 
         Returns:
-            TrainingResult with metrics and feature importance
+            TrainingResult with metrics, feature importance, and insights
         """
         self.ticker = ticker
         self.train_date = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         self.feature_names = self.feature_builder.get_feature_names()
+        self.features_df = features_df.copy()  # Store for insights
 
         # Extract features and target
         X, y = self.feature_builder.get_feature_matrix(features_df)
@@ -175,14 +215,58 @@ class MLTradeFilter:
         if len(X) < 20:
             raise ValueError(f"Not enough samples for training: {len(X)} (need at least 20)")
 
-        # Split data
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=test_size, random_state=42, stratify=y
-        )
+        # Use time-based split (last 20% as test) for proper temporal validation
+        # This is more realistic for trading - we always predict future from past
+        split_idx = int(len(X) * (1 - test_size))
+        X_train, X_test = X[:split_idx], X[split_idx:]
+        y_train, y_test = y[:split_idx], y[split_idx:]
 
-        # Create and train model
-        self.model = lgb.LGBMClassifier(**self.params)
-        self.model.fit(X_train, y_train)
+        # Create and train model(s)
+        if self.use_ensemble:
+            # Create ensemble of models
+            lgb_model = lgb.LGBMClassifier(**self.params)
+            rf_model = RandomForestClassifier(**self.RF_PARAMS)
+            lr_model = LogisticRegression(
+                class_weight='balanced',
+                max_iter=1000,
+                random_state=42
+            )
+
+            # Voting classifier with soft voting (uses probabilities)
+            self.model = VotingClassifier(
+                estimators=[
+                    ('lgb', lgb_model),
+                    ('rf', rf_model),
+                    ('lr', lr_model)
+                ],
+                voting='soft',
+                weights=[
+                    self.ENSEMBLE_WEIGHTS['lightgbm'],
+                    self.ENSEMBLE_WEIGHTS['random_forest'],
+                    self.ENSEMBLE_WEIGHTS['logistic']
+                ]
+            )
+            self.model.fit(X_train, y_train)
+
+            # Get the fitted LightGBM model from inside the ensemble for feature importance
+            self.lgb_model = self.model.named_estimators_['lgb']
+            importance = dict(zip(
+                self.feature_names,
+                self.lgb_model.feature_importances_.tolist()
+            ))
+            model_type = "ensemble"
+        else:
+            # Single LightGBM model
+            self.lgb_model = lgb.LGBMClassifier(**self.params)
+            self.model = self.lgb_model
+            self.model.fit(X_train, y_train)
+
+            # Feature importance
+            importance = dict(zip(
+                self.feature_names,
+                self.model.feature_importances_.tolist()
+            ))
+            model_type = "lightgbm"
 
         # Predictions
         y_pred = self.model.predict(X_test)
@@ -201,17 +285,20 @@ class MLTradeFilter:
 
         cm = confusion_matrix(y_test, y_pred)
 
-        # Cross-validation
+        # Time-series cross-validation (proper for trading data)
+        tscv = TimeSeriesSplit(n_splits=cv_folds)
+        if self.use_ensemble:
+            # For ensemble, use a fresh LightGBM for CV (faster)
+            cv_model = lgb.LGBMClassifier(**self.params)
+        else:
+            cv_model = lgb.LGBMClassifier(**self.params)
+
         cv_scores = cross_val_score(
-            lgb.LGBMClassifier(**self.params),
-            X, y, cv=cv_folds, scoring='accuracy'
+            cv_model, X, y, cv=tscv, scoring='accuracy'
         ).tolist()
 
-        # Feature importance
-        importance = dict(zip(
-            self.feature_names,
-            self.model.feature_importances_.tolist()
-        ))
+        # Generate actionable insights
+        insights = self._generate_insights(features_df, importance)
 
         # Store result
         self.training_result = TrainingResult(
@@ -228,10 +315,153 @@ class MLTradeFilter:
             n_samples=len(X),
             n_winners=int(y.sum()),
             n_losers=int(len(y) - y.sum()),
-            train_date=self.train_date
+            train_date=self.train_date,
+            insights=insights,
+            model_type=model_type
         )
 
         return self.training_result
+
+    def _generate_insights(
+        self,
+        features_df: pd.DataFrame,
+        feature_importance: Dict[str, float]
+    ) -> List[str]:
+        """
+        Generate actionable insights from the training data.
+
+        Analyzes win rates by different dimensions and generates
+        human-readable recommendations.
+        """
+        insights = []
+        day_names = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']
+
+        # Need minimum samples for reliable insights
+        if len(features_df) < 30:
+            insights.append("Not enough data for reliable insights (need 30+ trades)")
+            return insights
+
+        overall_win_rate = features_df['is_winner'].mean()
+
+        # Day of week analysis
+        if 'day_of_week' in features_df.columns:
+            day_win_rates = features_df.groupby('day_of_week')['is_winner'].agg(['mean', 'count'])
+            for day_idx, row in day_win_rates.iterrows():
+                if row['count'] >= 10:  # Need enough samples
+                    day_name = day_names[int(day_idx)] if int(day_idx) < 5 else f"Day {day_idx}"
+                    if row['mean'] < overall_win_rate - 0.10:  # 10% worse than average
+                        insights.append(
+                            f"Consider avoiding {day_name}s - only {row['mean']:.0%} win rate "
+                            f"({int(row['count'])} trades)"
+                        )
+                    elif row['mean'] > overall_win_rate + 0.10:  # 10% better than average
+                        insights.append(
+                            f"{day_name}s show strong results - {row['mean']:.0%} win rate "
+                            f"({int(row['count'])} trades)"
+                        )
+
+        # IB range analysis
+        if 'ib_range_percent' in features_df.columns:
+            median_ib = features_df['ib_range_percent'].median()
+            if median_ib > 0:
+                wide_ib = features_df[features_df['ib_range_percent'] > median_ib * 1.5]
+                narrow_ib = features_df[features_df['ib_range_percent'] < median_ib * 0.5]
+
+                if len(wide_ib) >= 10:
+                    wide_wr = wide_ib['is_winner'].mean()
+                    if wide_wr < overall_win_rate - 0.08:
+                        insights.append(
+                            f"Wide IB days (>{median_ib*1.5:.1f}%) underperform - "
+                            f"{wide_wr:.0%} win rate ({len(wide_ib)} trades)"
+                        )
+                    elif wide_wr > overall_win_rate + 0.08:
+                        insights.append(
+                            f"Wide IB days (>{median_ib*1.5:.1f}%) perform well - "
+                            f"{wide_wr:.0%} win rate ({len(wide_ib)} trades)"
+                        )
+
+                if len(narrow_ib) >= 10:
+                    narrow_wr = narrow_ib['is_winner'].mean()
+                    if narrow_wr < overall_win_rate - 0.08:
+                        insights.append(
+                            f"Narrow IB days (<{median_ib*0.5:.1f}%) underperform - "
+                            f"{narrow_wr:.0%} win rate ({len(narrow_ib)} trades)"
+                        )
+
+        # Gap analysis
+        if 'gap_percent' in features_df.columns:
+            gap_up = features_df[features_df['gap_percent'] > 0.5]
+            gap_down = features_df[features_df['gap_percent'] < -0.5]
+
+            if len(gap_up) >= 10:
+                gap_up_wr = gap_up['is_winner'].mean()
+                if gap_up_wr < overall_win_rate - 0.08:
+                    insights.append(
+                        f"Gap-up days (>0.5%) show weaker results - "
+                        f"{gap_up_wr:.0%} win rate ({len(gap_up)} trades)"
+                    )
+                elif gap_up_wr > overall_win_rate + 0.08:
+                    insights.append(
+                        f"Gap-up days (>0.5%) show strong results - "
+                        f"{gap_up_wr:.0%} win rate ({len(gap_up)} trades)"
+                    )
+
+            if len(gap_down) >= 10:
+                gap_down_wr = gap_down['is_winner'].mean()
+                if gap_down_wr < overall_win_rate - 0.08:
+                    insights.append(
+                        f"Gap-down days (<-0.5%) show weaker results - "
+                        f"{gap_down_wr:.0%} win rate ({len(gap_down)} trades)"
+                    )
+                elif gap_down_wr > overall_win_rate + 0.08:
+                    insights.append(
+                        f"Gap-down days (<-0.5%) show strong results - "
+                        f"{gap_down_wr:.0%} win rate ({len(gap_down)} trades)"
+                    )
+
+        # Entry hour analysis
+        if 'entry_hour' in features_df.columns:
+            hour_win_rates = features_df.groupby('entry_hour')['is_winner'].agg(['mean', 'count'])
+            for hour, row in hour_win_rates.iterrows():
+                if row['count'] >= 10:
+                    if row['mean'] < overall_win_rate - 0.12:
+                        insights.append(
+                            f"Avoid entries at {int(hour)}:00 - only {row['mean']:.0%} win rate "
+                            f"({int(row['count'])} trades)"
+                        )
+                    elif row['mean'] > overall_win_rate + 0.12:
+                        insights.append(
+                            f"Best entry time: {int(hour)}:00 - {row['mean']:.0%} win rate "
+                            f"({int(row['count'])} trades)"
+                        )
+
+        # Prior days trend analysis
+        if 'prior_days_bullish_count' in features_df.columns:
+            bullish_trend = features_df[features_df['prior_days_bullish_count'] >= 2]
+            bearish_trend = features_df[features_df['prior_days_bullish_count'] == 0]
+
+            if len(bullish_trend) >= 10:
+                bull_wr = bullish_trend['is_winner'].mean()
+                if abs(bull_wr - overall_win_rate) > 0.08:
+                    trend_word = "better" if bull_wr > overall_win_rate else "worse"
+                    insights.append(
+                        f"After bullish days (2+ up), results are {trend_word} - "
+                        f"{bull_wr:.0%} win rate ({len(bullish_trend)} trades)"
+                    )
+
+        # Top feature insight
+        if feature_importance:
+            top_feature = max(feature_importance, key=feature_importance.get)
+            readable_name = top_feature.replace('_', ' ').title()
+            insights.append(f"Most predictive feature: {readable_name}")
+
+        # Overall assessment
+        if overall_win_rate < 0.45:
+            insights.insert(0, f"Warning: Overall win rate is low ({overall_win_rate:.0%}) - consider different parameters")
+        elif overall_win_rate > 0.60:
+            insights.insert(0, f"Strong base win rate: {overall_win_rate:.0%}")
+
+        return insights
 
     def predict(self, features: np.ndarray) -> np.ndarray:
         """
@@ -274,7 +504,12 @@ class MLTradeFilter:
         is_long: bool,
         qqq_confirmed: bool = False,
         distance_from_ib_percent: float = 0.0,
-        ib_duration_minutes: int = 30
+        ib_duration_minutes: int = 30,
+        # Strategy parameters
+        profit_target_percent: float = 1.0,
+        stop_loss_type: str = 'opposite_ib',
+        trailing_stop_enabled: bool = False,
+        break_even_enabled: bool = False
     ) -> float:
         """
         Predict win probability for a single trade.
@@ -283,6 +518,7 @@ class MLTradeFilter:
             Win probability (0.0 to 1.0)
         """
         features = np.array([[
+            # Market condition features
             ib_range_percent,
             ib_duration_minutes,
             gap_percent,
@@ -295,7 +531,14 @@ class MLTradeFilter:
             1 if is_long else 0,
             0 if is_long else 1,  # is_short
             1 if qqq_confirmed else 0,
-            distance_from_ib_percent
+            distance_from_ib_percent,
+            # Strategy parameters
+            profit_target_percent,
+            1 if stop_loss_type == 'opposite_ib' else 0,
+            1 if stop_loss_type == 'fixed_percent' else 0,
+            1 if stop_loss_type == 'atr' else 0,
+            1 if trailing_stop_enabled else 0,
+            1 if break_even_enabled else 0,
         ]])
 
         return self.predict_proba(features)[0]
@@ -312,10 +555,12 @@ class MLTradeFilter:
 
         save_data = {
             'model': self.model,
+            'lgb_model': self.lgb_model,
             'feature_names': self.feature_names,
             'params': self.params,
             'ticker': self.ticker,
             'train_date': self.train_date,
+            'use_ensemble': self.use_ensemble,
             'training_result': self.training_result.to_dict() if self.training_result else None
         }
 
@@ -331,6 +576,7 @@ class MLTradeFilter:
             'ticker': self.ticker,
             'train_date': self.train_date,
             'feature_names': self.feature_names,
+            'use_ensemble': self.use_ensemble,
             'params': {k: v for k, v in self.params.items() if not callable(v)},
             'training_result': self.training_result.to_dict() if self.training_result else None
         }
@@ -351,8 +597,12 @@ class MLTradeFilter:
         with open(filepath, 'rb') as f:
             save_data = pickle.load(f)
 
-        instance = cls(params=save_data.get('params'))
+        instance = cls(
+            params=save_data.get('params'),
+            use_ensemble=save_data.get('use_ensemble', False)
+        )
         instance.model = save_data['model']
+        instance.lgb_model = save_data.get('lgb_model')
         instance.feature_names = save_data['feature_names']
         instance.ticker = save_data.get('ticker', '')
         instance.train_date = save_data.get('train_date', '')
@@ -374,20 +624,27 @@ class MLTradeFilter:
                 n_samples=result_dict['n_samples'],
                 n_winners=result_dict['n_winners'],
                 n_losers=result_dict['n_losers'],
-                train_date=result_dict['train_date']
+                train_date=result_dict['train_date'],
+                insights=result_dict.get('insights', []),
+                model_type=result_dict.get('model_type', 'lightgbm')
             )
 
         return instance
 
     def get_feature_importance(self) -> Dict[str, float]:
         """Get feature importance dictionary."""
-        if self.model is None:
-            return {}
-
-        return dict(zip(
-            self.feature_names,
-            self.model.feature_importances_.tolist()
-        ))
+        if self.lgb_model is not None:
+            # Use LightGBM model for feature importance (works for both ensemble and single)
+            return dict(zip(
+                self.feature_names,
+                self.lgb_model.feature_importances_.tolist()
+            ))
+        elif self.model is not None and hasattr(self.model, 'feature_importances_'):
+            return dict(zip(
+                self.feature_names,
+                self.model.feature_importances_.tolist()
+            ))
+        return {}
 
     def get_model_info(self) -> Dict[str, Any]:
         """Get model information for display."""
