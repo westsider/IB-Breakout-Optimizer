@@ -57,7 +57,7 @@ This file provides context and guidance for Claude Code when working with this p
 
 **Desktop App (PySide6) - Primary**
 - Native desktop application with professional dark theme
-- 8 tabs: Optimization, Equity Curve, Trade Browser, IB Analysis, Monitoring, ML Filter, Saved Tests, Download
+- 9 tabs: Optimization, Portfolio, Equity Curve, Trade Browser, IB Analysis, Monitoring, ML Filter, Saved Tests, Download
 - QThread workers for non-blocking background processing
 - Live progress updates with elapsed time and ETA
 - Two-phase optimization (Grid + Bayesian) with presets (quick, standard, full, thorough)
@@ -76,6 +76,12 @@ This file provides context and guidance for Claude Code when working with this p
   - Save button in Optimization tab to save current best
   - Shows parameters, equity curve, P&L, PF, Win%, Sharpe
   - Load saved params back to optimizer for re-testing
+- **Portfolio tab** for multi-ticker portfolio simulation
+  - Select multiple tickers from saved tests with checkboxes
+  - Combined equity curve showing aggregate performance
+  - Portfolio-level statistics: Total P&L, Combined PF, Combined Sharpe, Max DD
+  - Per-ticker breakdown table with contribution percentages
+  - Individual ticker curves overlaid on combined chart
 - **Statistical filter dropdowns** in Optimization tab for gap, trend, and range filters
 - **Rebuild Stats button** in Download tab to recompute distribution stats after new data
 
@@ -163,19 +169,21 @@ This file provides context and guidance for Claude Code when working with this p
 - **Optimizer integration**: best results auto-populate ML tab when optimization completes
 - Save/load trained models
 
-### Pending Phases
-
-#### Phase 7: Portfolio View Tab (Not Started)
+#### Phase 7: Portfolio View Tab (Complete)
 - New "Portfolio" tab in desktop app
-- Multi-ticker selection (checkboxes for AAPL, TSLA, MSFT, NVDA, etc.)
-- Load best optimization results for each selected ticker
-- Combined equity curve showing aggregate P&L
+- Multi-ticker selection via checkboxes loading from Saved Tests
+- Best results for each ticker auto-selected (highest P&L)
+- Combined equity curve showing aggregate P&L with individual ticker overlays
 - Portfolio-level statistics:
   - Total P&L across all tickers
-  - Combined Sharpe ratio
+  - Combined Sharpe ratio (trade-weighted average)
+  - Combined Profit Factor
   - Max portfolio drawdown
-  - Correlation matrix between ticker returns
-- Per-ticker breakdown table showing individual contributions
+- Per-ticker breakdown table showing:
+  - Individual P&L, trades, win rate, PF, Sharpe
+  - Contribution percentage to total portfolio
+
+### Pending Phases
 
 ---
 
@@ -239,6 +247,7 @@ C:\Users\Warren\Projects\ib_breakout_optimizer\
 │   ├── main_window.py         # Main window with tabs
 │   ├── tabs/
 │   │   ├── optimization_tab.py # Grid search with live progress
+│   │   ├── portfolio_tab.py   # Multi-ticker portfolio simulation
 │   │   ├── equity_curve_tab.py # Equity/drawdown charts
 │   │   ├── trade_browser_tab.py # Trade list with charts
 │   │   ├── ib_analysis_tab.py # IB size/day analysis

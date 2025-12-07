@@ -10,6 +10,7 @@ from PySide6.QtCore import Qt, QSettings
 from PySide6.QtGui import QAction
 
 from desktop_ui.tabs.optimization_tab import OptimizationTab
+from desktop_ui.tabs.portfolio_tab import PortfolioTab
 from desktop_ui.tabs.trade_browser_tab import TradeBrowserTab
 from desktop_ui.tabs.ib_analysis_tab import IBAnalysisTab
 from desktop_ui.tabs.equity_curve_tab import EquityCurveTab
@@ -113,6 +114,7 @@ class MainWindow(QMainWindow):
 
         # Create tabs
         self.optimization_tab = OptimizationTab(self.data_dir, self.output_dir)
+        self.portfolio_tab = PortfolioTab(self.output_dir)
         self.trade_browser_tab = TradeBrowserTab(self.data_dir)
         self.ib_analysis_tab = IBAnalysisTab()
         self.equity_curve_tab = EquityCurveTab()
@@ -132,6 +134,7 @@ class MainWindow(QMainWindow):
 
         # Add tabs
         self.tabs.addTab(self.optimization_tab, "Optimization")
+        self.tabs.addTab(self.portfolio_tab, "Portfolio")
         self.tabs.addTab(self.equity_curve_tab, "Equity Curve")
         self.tabs.addTab(self.trade_browser_tab, "Trade Browser")
         self.tabs.addTab(self.ib_analysis_tab, "IB Analysis")
@@ -210,6 +213,7 @@ class MainWindow(QMainWindow):
             self.optimization_tab.set_output_dir(directory)
             self.ml_filter_tab.set_output_dir(directory)
             self.saved_tests_tab.set_output_dir(directory)
+            self.portfolio_tab.set_output_dir(directory)
 
             self.status_label.setText(f"Output directory set to: {directory}")
 
