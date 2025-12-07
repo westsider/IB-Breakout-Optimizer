@@ -190,9 +190,12 @@ class WalkForwardWorker(QThread):
 
                 runner = BacktestRunner(self.data_dir)
 
-                # Convert params dict to StrategyParams
+                # Convert params dict to StrategyParams - filter to only valid fields
                 from strategy.ib_breakout import StrategyParams
-                strategy_params = StrategyParams(**best_params)
+                from dataclasses import fields
+                valid_fields = {f.name for f in fields(StrategyParams)}
+                filtered_params = {k: v for k, v in best_params.items() if k in valid_fields}
+                strategy_params = StrategyParams(**filtered_params)
 
                 backtest_result, oos_metrics = runner.run_backtest(
                     ticker=self.ticker,
