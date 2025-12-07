@@ -82,15 +82,20 @@ class WalkForwardWorker(QThread):
             from optimization.mmap_grid_search import MMapGridSearchOptimizer
             from optimization.parameter_space import create_parameter_space
             from backtester.backtest_runner import BacktestRunner
+            from pathlib import Path
             import pandas as pd
 
-            # Load data to determine date range
-            optimizer = MMapGridSearchOptimizer(self.data_dir)
-            optimizer.load_data(self.ticker)
+            # Load data directly to determine date range
+            data_path = Path(self.data_dir) / f"{self.ticker}_NT.txt"
+            if not data_path.exists():
+                self.error.emit(f"Data file not found: {data_path}")
+                return
+
+            df = pd.read_csv(data_path, sep=';', header=None,
+                names=['datetime', 'open', 'high', 'low', 'close', 'volume', 'oi'])
 
             # Get data date range
-            data = optimizer.data
-            dates = pd.to_datetime(data['datetime'].astype(str).str[:8], format='%Y%m%d')
+            dates = pd.to_datetime(df['datetime'].astype(str).str[:8], format='%Y%m%d')
             data_start = dates.min()
             data_end = dates.max()
 
@@ -126,6 +131,10 @@ class WalkForwardWorker(QThread):
 
             total_periods = len(periods)
             self.progress.emit(0, total_periods, f"Starting walk-forward analysis ({total_periods} periods)")
+
+            # Create optimizer once - it will be used for all training periods
+            optimizer = MMapGridSearchOptimizer(self.data_dir)
+            optimizer.load_data(self.ticker)
 
             results = []
             all_oos_equity = []
@@ -392,6 +401,7 @@ class WalkForwardTab(QWidget):
         self.status_label = QLabel("Ready")
         self.status_label.setStyleSheet("color: #888888;")
         self.status_label.setMinimumWidth(200)
+        self.status_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         metrics_row.addWidget(self.status_label)
 
         # In-sample metrics
