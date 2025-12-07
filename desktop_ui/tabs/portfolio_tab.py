@@ -132,7 +132,7 @@ class PortfolioTab(QWidget):
         metrics_layout.addStretch()
         results_layout.addLayout(metrics_layout)
 
-        # Vertical splitter for chart and table
+        # Vertical splitter for charts and table
         chart_splitter = QSplitter(Qt.Vertical)
 
         # Combined equity chart
@@ -148,10 +148,28 @@ class PortfolioTab(QWidget):
         chart_layout.setContentsMargins(2, 2, 2, 2)
 
         self.chart_view = QWebEngineView()
-        self.chart_view.setMinimumHeight(250)
+        self.chart_view.setMinimumHeight(200)
         chart_layout.addWidget(self.chart_view)
 
         chart_splitter.addWidget(chart_frame)
+
+        # Monthly P&L bar chart
+        monthly_frame = QFrame()
+        monthly_frame.setStyleSheet("""
+            QFrame {
+                border: 1px solid #333333;
+                border-radius: 4px;
+                background-color: #1e1e1e;
+            }
+        """)
+        monthly_layout = QVBoxLayout(monthly_frame)
+        monthly_layout.setContentsMargins(2, 2, 2, 2)
+
+        self.monthly_chart_view = QWebEngineView()
+        self.monthly_chart_view.setMinimumHeight(150)
+        monthly_layout.addWidget(self.monthly_chart_view)
+
+        chart_splitter.addWidget(monthly_frame)
 
         # Per-ticker breakdown table
         table_frame = QFrame()
@@ -173,7 +191,7 @@ class PortfolioTab(QWidget):
         table_layout.addWidget(self.breakdown_table)
 
         chart_splitter.addWidget(table_frame)
-        chart_splitter.setSizes([350, 250])
+        chart_splitter.setSizes([280, 180, 180])
 
         results_layout.addWidget(chart_splitter)
 
@@ -209,11 +227,12 @@ class PortfolioTab(QWidget):
             cb.deleteLater()
         self.ticker_checkboxes.clear()
 
-        # Remove stretch
+        # Properly clear the layout (widgets and spacers)
         while self.checkbox_layout.count() > 0:
             item = self.checkbox_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
+            # Spacer items don't have widgets, just remove them
 
         # Add checkbox for each ticker with saved results
         for ticker in sorted(self.saved_results.keys()):
@@ -225,18 +244,20 @@ class PortfolioTab(QWidget):
             best_result = max(results_list, key=lambda r: r.get('total_pnl', 0))
             pnl = best_result.get('total_pnl', 0)
             trades = best_result.get('total_trades', 0)
+            pf = best_result.get('profit_factor', 0)
 
-            # Create checkbox with details
-            cb = QCheckBox(f"{ticker}")
+            # Create checkbox with details - show P&L in label
+            cb = QCheckBox(f"{ticker}  ${pnl:,.0f}  PF:{pf:.1f}")
             cb.setToolTip(
                 f"Best P&L: ${pnl:,.0f}\n"
                 f"Trades: {trades}\n"
-                f"PF: {best_result.get('profit_factor', 0):.2f}\n"
+                f"PF: {pf:.2f}\n"
                 f"Win Rate: {best_result.get('win_rate', 0):.1f}%"
             )
             cb.setStyleSheet(f"""
                 QCheckBox {{
-                    padding: 4px;
+                    padding: 6px;
+                    font-size: 12px;
                     color: {'#00ff00' if pnl > 0 else '#ff4444'};
                 }}
             """)
@@ -260,7 +281,10 @@ class PortfolioTab(QWidget):
         ticker = sender.property("ticker")
         result = sender.property("result")
 
-        if state == Qt.Checked:
+        # State is int: 0 = unchecked, 2 = checked
+        is_checked = state == 2
+
+        if is_checked:
             self.selected_results[ticker] = result
         else:
             if ticker in self.selected_results:
@@ -400,8 +424,9 @@ class PortfolioTab(QWidget):
         self.max_drawdown_card.set_value(f"${max_dd:,.0f}", "#ff4444")
         self.ticker_count_card.set_value(str(len(self.selected_results)))
 
-        # Update chart
+        # Update charts
         self._update_chart(all_equity_curves, combined_curve, total_pnl)
+        self._update_monthly_chart(combined_curve, total_trades)
 
         # Update breakdown table
         self._update_breakdown_table(ticker_data, total_pnl)
@@ -512,6 +537,114 @@ class PortfolioTab(QWidget):
         html = html.replace('<body>', '<body style="background-color: #1e1e1e; margin: 0; padding: 0;">')
         self.chart_view.setHtml(html)
 
+    def _update_monthly_chart(self, combined_curve: List[float], total_trades: int):
+        """Update the monthly P&L bar chart."""
+        if not combined_curve or total_trades == 0:
+            self.monthly_chart_view.setHtml("")
+            return
+
+        # Calculate monthly P&L from equity curve
+        # Assume each point is roughly one trade, distribute across months
+        # For a more accurate approach, we'd need actual trade dates
+        # Here we'll estimate months by dividing the curve into ~12 segments
+
+        num_points = len(combined_curve)
+
+        # Estimate trades per month (assuming ~1 year of data with 12 months)
+        # We'll create synthetic monthly data by dividing equity curve into segments
+        num_months = min(12, max(1, num_points // 20))  # Roughly estimate months
+
+        if num_months < 2:
+            # Too few data points, just show total
+            num_months = 1
+
+        points_per_month = num_points // num_months
+
+        # Calculate P&L change for each month segment
+        monthly_pnl = []
+        month_labels = []
+
+        # Generate month labels (most recent 12 months or less)
+        from datetime import datetime, timedelta
+        current_date = datetime.now()
+
+        for i in range(num_months):
+            start_idx = i * points_per_month
+            end_idx = min((i + 1) * points_per_month, num_points) - 1
+
+            if start_idx >= num_points:
+                break
+
+            start_val = combined_curve[start_idx] if start_idx > 0 else 0
+            end_val = combined_curve[end_idx]
+
+            # P&L for this month is the change
+            if i == 0:
+                pnl = end_val  # First month starts from 0
+            else:
+                prev_end_idx = start_idx - 1
+                prev_val = combined_curve[prev_end_idx] if prev_end_idx >= 0 else 0
+                pnl = end_val - prev_val
+
+            monthly_pnl.append(pnl)
+
+            # Calculate month label going backwards from current month
+            month_offset = num_months - 1 - i
+            month_date = current_date - timedelta(days=30 * month_offset)
+            month_labels.append(month_date.strftime("%b %Y"))
+
+        # Create bar colors (green for positive, red for negative)
+        colors = ['#00ff00' if p >= 0 else '#ff4444' for p in monthly_pnl]
+
+        # Create the bar chart
+        fig = go.Figure()
+
+        fig.add_trace(go.Bar(
+            x=month_labels,
+            y=monthly_pnl,
+            marker_color=colors,
+            text=[f"${p:,.0f}" for p in monthly_pnl],
+            textposition='outside',
+            textfont=dict(size=10, color='#cccccc'),
+            hovertemplate="<b>%{x}</b><br>P&L: $%{y:,.0f}<extra></extra>"
+        ))
+
+        # Calculate summary stats
+        positive_months = sum(1 for p in monthly_pnl if p > 0)
+        negative_months = sum(1 for p in monthly_pnl if p < 0)
+        avg_monthly = sum(monthly_pnl) / len(monthly_pnl) if monthly_pnl else 0
+
+        # Update layout
+        fig.update_layout(
+            height=180,
+            margin=dict(l=60, r=20, t=40, b=40),
+            paper_bgcolor='#1e1e1e',
+            plot_bgcolor='#252525',
+            font=dict(color='#cccccc', size=10),
+            showlegend=False,
+            title=dict(
+                text=f"Monthly P&L | Avg: ${avg_monthly:,.0f}/mo | {positive_months} Win / {negative_months} Loss Months",
+                font=dict(size=11, color='#aaaaaa'),
+                x=0.5
+            ),
+            xaxis=dict(
+                tickangle=-45,
+                tickfont=dict(size=9)
+            ),
+            yaxis=dict(
+                tickformat='$,.0f',
+                gridcolor='#333333'
+            )
+        )
+
+        # Add zero line
+        fig.add_hline(y=0, line_dash="dash", line_color="#555555", line_width=1)
+
+        # Render to HTML
+        html = fig.to_html(include_plotlyjs='cdn', full_html=True)
+        html = html.replace('<body>', '<body style="background-color: #1e1e1e; margin: 0; padding: 0;">')
+        self.monthly_chart_view.setHtml(html)
+
     def _update_breakdown_table(self, ticker_data: List[dict], total_pnl: float):
         """Update the per-ticker breakdown table."""
         # Sort by P&L descending
@@ -565,6 +698,7 @@ class PortfolioTab(QWidget):
         self.ticker_count_card.set_value("0")
         self.breakdown_table.setRowCount(0)
         self.chart_view.setHtml("")
+        self.monthly_chart_view.setHtml("")
 
     def _refresh_all(self):
         """Refresh saved results from disk."""

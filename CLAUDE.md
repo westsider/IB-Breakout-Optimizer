@@ -82,6 +82,7 @@ This file provides context and guidance for Claude Code when working with this p
   - Portfolio-level statistics: Total P&L, Combined PF, Combined Sharpe, Max DD
   - Per-ticker breakdown table with contribution percentages
   - Individual ticker curves overlaid on combined chart
+  - **Monthly P&L bar chart** showing gain/loss per month with win/loss month stats
 - **Statistical filter dropdowns** in Optimization tab for gap, trend, and range filters
 - **Rebuild Stats button** in Download tab to recompute distribution stats after new data
 
