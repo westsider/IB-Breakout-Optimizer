@@ -98,6 +98,7 @@ class PerformanceMetrics:
     avg_mae: float = 0.0
     avg_mfe: float = 0.0
     avg_etd: float = 0.0  # End Trade Drawdown
+    avg_move_capture: float = 0.0  # Avg % of available move captured
 
     # Probability (from NT - not sure what this is)
     probability: float = 0.0
@@ -156,6 +157,7 @@ class PerformanceMetrics:
                 'Avg. MAE': f"${self.avg_mae:.2f}",
                 'Avg. MFE': f"${self.avg_mfe:.2f}",
                 'Avg. ETD': f"${self.avg_etd:.2f}",
+                'Avg. Move Capture': f"{self.avg_move_capture:.1f}%",
             }
         }
 
@@ -209,6 +211,7 @@ class PerformanceMetrics:
         print(f"{'Avg. MAE':<30} ${self.avg_mae:>10,.2f}")
         print(f"{'Avg. MFE':<30} ${self.avg_mfe:>10,.2f}")
         print(f"{'Avg. ETD':<30} ${self.avg_etd:>10,.2f}")
+        print(f"{'Avg. Move Capture':<30} {self.avg_move_capture:>10.1f}%")
         print("=" * 60)
 
 
@@ -324,6 +327,10 @@ def calculate_metrics(trades: List[Trade], initial_capital: float = 100000.0) ->
     metrics.avg_mae = np.mean(mae_values) if mae_values else 0.0
     metrics.avg_mfe = np.mean(mfe_values) if mfe_values else 0.0
     metrics.avg_etd = metrics.avg_mfe - metrics.avg_trade if metrics.avg_mfe > 0 else 0.0
+
+    # Move Capture % - average of how much available move was captured
+    move_capture_values = [t.move_capture_pct for t in trades if t.move_capture_pct != 0]
+    metrics.avg_move_capture = np.mean(move_capture_values) if move_capture_values else 0.0
 
     # Exit reason analysis
     metrics.exit_reasons = defaultdict(int)

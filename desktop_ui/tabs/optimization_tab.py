@@ -272,10 +272,10 @@ class OptimizationTab(QWidget):
         top_layout.addWidget(top_label)
 
         self.results_table = QTableWidget()
-        self.results_table.setColumnCount(9)  # Added PF column
+        self.results_table.setColumnCount(10)  # Added MC% column
         self.results_table.setHorizontalHeaderLabels([
             "Direction", "Target", "Stop", "QQQ",
-            "Objective", "PF", "Trades", "Win%", "P&L"
+            "Objective", "PF", "Trades", "Win%", "MC%", "P&L"
         ])
         self.results_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.results_table.setAlternatingRowColors(True)
@@ -679,9 +679,21 @@ class OptimizationTab(QWidget):
             wr = result.get('win_rate', 0)
             self.results_table.setItem(row, 7, QTableWidgetItem(f"{wr:.1f}%"))
 
+            # Move Capture %
+            mc = result.get('avg_move_capture', 0)
+            mc_item = QTableWidgetItem(f"{mc:.1f}%")
+            from PySide6.QtGui import QColor
+            if mc >= 50:
+                mc_item.setForeground(QColor("#00ff00"))
+            elif mc >= 25:
+                mc_item.setForeground(QColor("#ffaa00"))
+            else:
+                mc_item.setForeground(QColor("#ff4444"))
+            self.results_table.setItem(row, 8, mc_item)
+
             # P&L
             pnl = result.get('total_pnl', 0)
-            self.results_table.setItem(row, 8, QTableWidgetItem(f"${pnl:,.2f}"))
+            self.results_table.setItem(row, 9, QTableWidgetItem(f"${pnl:,.2f}"))
 
     def _on_result_selected(self):
         """Handle result row selection - show equity curve."""

@@ -279,6 +279,9 @@ class OptimizationWorker(QThread):
                 pf = r.metrics.profit_factor
                 trade_pnls = []
 
+            # Get move capture if available
+            avg_move_capture = getattr(r, 'avg_move_capture', 0)
+
             # Include ALL params from the optimization result
             result_dict = dict(r.params)  # Start with all params
             result_dict.update({
@@ -287,6 +290,7 @@ class OptimizationWorker(QThread):
                 'total_trades': trades or 0,
                 'win_rate': win_rate or 0,
                 'total_pnl': pnl or 0,
+                'avg_move_capture': avg_move_capture,
                 'trade_pnls': trade_pnls  # Individual trade P&Ls for equity curve
             })
             top_results.append(result_dict)
@@ -568,6 +572,7 @@ class OptimizationWorker(QThread):
         for r in results.phase1_results.get_top_n(10):
             m = get_metrics(r)
             trade_pnls = getattr(r, 'trade_pnls', [])
+            avg_move_capture = getattr(r, 'avg_move_capture', 0)
             # Include ALL params from the optimization result
             result_dict = dict(r.params)
             result_dict.update({
@@ -576,6 +581,7 @@ class OptimizationWorker(QThread):
                 'total_trades': m['total_trades'],
                 'win_rate': m['win_rate'],
                 'total_pnl': m['total_pnl'],
+                'avg_move_capture': avg_move_capture,
                 'trade_pnls': trade_pnls
             })
             top_results.append(result_dict)

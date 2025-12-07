@@ -266,6 +266,7 @@ class Trade:
         mae: Maximum Adverse Excursion (worst drawdown during trade)
         mfe: Maximum Favorable Excursion (best profit during trade)
         bars_held: Number of bars position was held
+        move_capture_pct: Percentage of available move captured (Krafer-style metric)
     """
     trade_id: str
     ticker: str
@@ -283,6 +284,7 @@ class Trade:
     mae: float = 0.0
     mfe: float = 0.0
     bars_held: int = 0
+    move_capture_pct: float = 0.0  # % of available move captured (exit-entry)/(day_high-ib_level)
 
     def calculate_pnl(self) -> None:
         """Calculate P&L after exit."""

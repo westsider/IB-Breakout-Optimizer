@@ -146,10 +146,10 @@ class TradeBrowserTab(QWidget):
         table_layout.addWidget(self.trade_count_label)
 
         self.trade_table = QTableWidget()
-        self.trade_table.setColumnCount(9)
+        self.trade_table.setColumnCount(10)
         self.trade_table.setHorizontalHeaderLabels([
             "Entry Time", "Exit Time", "Direction", "Entry", "Exit",
-            "P&L", "P&L %", "Exit Reason", "Bars"
+            "P&L", "P&L %", "Move Capture", "Exit Reason", "Bars"
         ])
         self.trade_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.trade_table.setAlternatingRowColors(True)
@@ -289,12 +289,24 @@ class TradeBrowserTab(QWidget):
             )
             self.trade_table.setItem(row, 6, pnl_pct_item)
 
+            # Move Capture %
+            move_capture = getattr(trade, 'move_capture_pct', 0)
+            mc_item = QTableWidgetItem(f"{move_capture:.1f}%")
+            if move_capture >= 50:
+                mc_color = QColor("#00ff00")
+            elif move_capture >= 25:
+                mc_color = QColor("#ffaa00")
+            else:
+                mc_color = QColor("#ff4444")
+            mc_item.setForeground(mc_color)
+            self.trade_table.setItem(row, 7, mc_item)
+
             # Exit reason
             exit_reason = trade.exit_reason.value if trade.exit_reason else ""
-            self.trade_table.setItem(row, 7, QTableWidgetItem(exit_reason))
+            self.trade_table.setItem(row, 8, QTableWidgetItem(exit_reason))
 
             # Bars held
-            self.trade_table.setItem(row, 8, QTableWidgetItem(str(trade.bars_held)))
+            self.trade_table.setItem(row, 9, QTableWidgetItem(str(trade.bars_held)))
 
     def _reset_filters(self):
         """Reset all filters to default."""

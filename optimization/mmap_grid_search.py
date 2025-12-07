@@ -45,6 +45,7 @@ class OptimizationResult:
     run_time_seconds: float = 0.0
     trade_pnls: List[float] = field(default_factory=list)  # Individual trade P&Ls for equity curve
     k_ratio: float = 0.0  # Kestner ratio for consistency measurement
+    avg_move_capture: float = 0.0  # Avg % of available move captured
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for export."""
@@ -59,6 +60,7 @@ class OptimizationResult:
             'max_drawdown': self.max_drawdown,
             'avg_trade': self.avg_trade,
             'k_ratio': self.k_ratio,
+            'avg_move_capture': self.avg_move_capture,
             'objective_value': self.objective_value,
             'run_time': self.run_time_seconds
             # Note: trade_pnls not included in CSV export to keep file size manageable
@@ -641,6 +643,7 @@ def _mmap_backtest_worker(
     # Simulate trades
     pnls = []
     exit_reasons = []
+    move_captures = []  # Track move capture % for each trade
 
     for idx, (entry_idx, entry_price, long, entry_date_idx) in enumerate(
         zip(entry_indices, entry_prices, is_long, entry_date_indices)
@@ -789,6 +792,29 @@ def _mmap_backtest_worker(
             pnls.append(pnl)
             exit_reasons.append(exit_reason)
 
+            # Calculate Move Capture %
+            # For longs: (exit - entry) / (day_high - ib_high) * 100
+            # For shorts: (entry - exit) / (ib_low - day_low) * 100
+            # This measures what % of the available move after IB breakout was captured
+            day_high = daily_highs[entry_date_idx]
+            day_low = daily_lows[entry_date_idx]
+
+            if long:
+                available_move = day_high - ib_high  # Max potential from IB high to day high
+                actual_move = exit_price - entry_price
+            else:
+                available_move = ib_low - day_low  # Max potential from IB low to day low
+                actual_move = entry_price - exit_price
+
+            if available_move > 0:
+                move_capture = (actual_move / available_move) * 100
+                # Cap at reasonable bounds (-200% to 200%)
+                move_capture = max(-200, min(200, move_capture))
+            else:
+                move_capture = 0.0
+
+            move_captures.append(move_capture)
+
     # Calculate metrics
     pnls = np.array(pnls)
 
@@ -805,7 +831,8 @@ def _mmap_backtest_worker(
             avg_trade=0.0,
             objective_value=-999.0,
             run_time_seconds=time.time() - start_time,
-            trade_pnls=pnls.tolist() if len(pnls) > 0 else []
+            trade_pnls=pnls.tolist() if len(pnls) > 0 else [],
+            avg_move_capture=np.mean(move_captures) if move_captures else 0.0
         )
 
     wins = pnls[pnls > 0]
@@ -884,6 +911,9 @@ def _mmap_backtest_worker(
     else:
         obj_value = sharpe
 
+    # Calculate avg move capture
+    avg_move_capture = np.mean(move_captures) if move_captures else 0.0
+
     return OptimizationResult(
         params=params,
         total_trades=len(pnls),
@@ -897,7 +927,8 @@ def _mmap_backtest_worker(
         objective_value=obj_value,
         run_time_seconds=time.time() - start_time,
         trade_pnls=pnls.tolist(),
-        k_ratio=k_ratio
+        k_ratio=k_ratio,
+        avg_move_capture=avg_move_capture
     )
 
 

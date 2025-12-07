@@ -21,7 +21,7 @@ This file provides context and guidance for Claude Code when working with this p
 - Daily parquet caching
 - Session builder with timezone handling (UTC → ET)
 - IB Calculator matching NinjaTrader logic
-- Basic metrics: P&L, win rate, trade count, Sharpe, Sortino
+- Basic metrics: P&L, win rate, trade count, Sharpe, Sortino, Move Capture %
 
 #### Phase 2: Backtester Core (Complete)
 - Event engine with order queue
@@ -66,6 +66,10 @@ This file provides context and guidance for Claude Code when working with this p
 - Results persisted between app launches
 - Desktop shortcut and batch file launcher
 - K-Ratio optimization objective for smooth equity curves
+- **Move Capture %** metric - measures trading efficiency (how much of available move was captured)
+  - Displayed in Equity Curve tab, Trade Browser, and Optimization results
+  - Formula: For longs: (exit-entry)/(day_high-ib_high); For shorts: (entry-exit)/(ib_low-day_low)
+  - Color coded: Green (≥50%), Yellow (25-49%), Red (<25%)
 - Double-click optimization result to populate Trade Browser, Equity Curve, IB Analysis, and Monitoring tabs
 - **Saved Tests tab** for storing and reviewing best results per instrument
   - Results persisted to `output/saved_tests/saved_results.json`

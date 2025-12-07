@@ -45,6 +45,9 @@ class EquityCurveTab(QWidget):
         self.avg_drawdown_card = MetricCard("Avg Drawdown")
         metrics_layout.addWidget(self.avg_drawdown_card)
 
+        self.move_capture_card = MetricCard("Move Capture")
+        metrics_layout.addWidget(self.move_capture_card)
+
         layout.addLayout(metrics_layout)
 
         # Charts splitter
@@ -129,7 +132,7 @@ class EquityCurveTab(QWidget):
 
         for card in [self.total_pnl_card, self.max_drawdown_card,
                      self.max_runup_card, self.recovery_factor_card,
-                     self.avg_drawdown_card]:
+                     self.avg_drawdown_card, self.move_capture_card]:
             card.set_value("--")
 
     def _update_equity_curve(self):
@@ -277,3 +280,18 @@ class EquityCurveTab(QWidget):
             self.avg_drawdown_card.set_value(f"${avg_dd:,.2f}", "#ffaa00")
         else:
             self.avg_drawdown_card.set_value("$0.00", "#00ff00")
+
+        # Move Capture % - avg of how much available move was captured
+        move_captures = [t.move_capture_pct for t in self.trades if hasattr(t, 'move_capture_pct') and t.move_capture_pct != 0]
+        if move_captures:
+            avg_capture = np.mean(move_captures)
+            # Color based on capture quality: >50% green, 25-50% yellow, <25% red
+            if avg_capture >= 50:
+                mc_color = "#00ff00"
+            elif avg_capture >= 25:
+                mc_color = "#ffaa00"
+            else:
+                mc_color = "#ff4444"
+            self.move_capture_card.set_value(f"{avg_capture:.1f}%", mc_color)
+        else:
+            self.move_capture_card.set_value("--", "#888888")
