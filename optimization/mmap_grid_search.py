@@ -1047,7 +1047,9 @@ class MMapGridSearchOptimizer:
         parameter_space: Optional[ParameterSpace] = None,
         objective: str = "sharpe_ratio",
         min_trades: int = 10,
-        progress_callback: Optional[Callable] = None
+        progress_callback: Optional[Callable] = None,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None
     ) -> GridSearchResults:
         """
         Run grid search optimization with memory-mapped arrays.
@@ -1057,12 +1059,32 @@ class MMapGridSearchOptimizer:
             objective: Objective to optimize
             min_trades: Minimum trades required
             progress_callback: Optional callback for progress updates
+            start_date: Optional start date filter (inclusive)
+            end_date: Optional end date filter (inclusive)
 
         Returns:
             GridSearchResults
         """
         if self.sessions is None:
             raise ValueError("No data loaded. Call load_data() first.")
+
+        # Filter sessions by date range if specified
+        sessions_to_use = self.sessions
+        if start_date or end_date:
+            filtered_sessions = []
+            for session in self.sessions:
+                session_date = session.date
+                if start_date and session_date < start_date.date():
+                    continue
+                if end_date and session_date > end_date.date():
+                    continue
+                filtered_sessions.append(session)
+            sessions_to_use = filtered_sessions
+            print(f"Date filter: {start_date.date() if start_date else 'start'} to {end_date.date() if end_date else 'end'}")
+            print(f"Sessions: {len(self.sessions)} -> {len(sessions_to_use)}")
+
+        if not sessions_to_use:
+            raise ValueError("No sessions in specified date range")
 
         space = parameter_space or create_parameter_space("standard")
         combinations = space.get_grid_combinations()
@@ -1116,7 +1138,7 @@ class MMapGridSearchOptimizer:
         # Create memory-mapped arrays
         print("Creating memory-mapped arrays...")
         self.mmap_manager = MMapDataManager(
-            self.sessions,
+            sessions_to_use,
             self.filter_bars_dict,
             ticker=self.ticker,
             filter_ticker="QQQ" if self.filter_bars_dict else ""
