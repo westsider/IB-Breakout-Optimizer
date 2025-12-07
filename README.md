@@ -18,11 +18,12 @@ A native desktop app with real-time progress updates and professional UI:
 
 ![Optimization Tab](docs/images/optimization_tab.png)
 
-- **Backtest Tab**: Run single backtests with configurable parameters
-- **Optimization Tab**: Grid search with live progress, elapsed time, and ETA
-- **Equity Curve Tab**: Interactive equity and drawdown charts
-- **Trade Browser Tab**: Browse trades with candlestick charts and entry/exit markers
-- **IB Analysis Tab**: Performance heatmaps by IB size, day-of-week, entry hour
+- **11 Tabs**: Optimization, Walk-Forward, Portfolio, Forward Tests, Equity Curve, Trade Browser, IB Analysis, Monitoring, ML Filter, Saved Tests, Download
+- **Grid Search Optimization**: Fast parallel optimization with memory-mapped arrays
+- **Walk-Forward Analysis**: Rolling out-of-sample validation
+- **Forward Testing**: Track live performance of optimized parameters
+- **Portfolio View**: Multi-ticker equity curves and correlation analysis
+- **Statistical Filters**: Gap, prior-day trend, and IB range filters
 
 ### Backtesting Engine
 - Event-driven architecture for accurate simulation
@@ -50,14 +51,6 @@ A native desktop app with real-time progress updates and professional UI:
   - `thorough`: 2,592 combinations (~40 sec) - fine-grained search
 - Customizable objective functions (Sharpe, Sortino, Profit Factor, etc.)
 
-### Web UI (Streamlit) - Alternative
-- Parameter configuration and backtest execution
-- Trade browser with candlestick charts showing entry/exit markers
-- Equity curve and drawdown visualization
-- Monthly returns heatmap
-- Performance analysis by day-of-week and entry hour
-- Load and compare saved optimization results
-
 ### Performance Metrics
 - Total P&L, Win Rate, Profit Factor
 - Sharpe Ratio, Sortino Ratio, Calmar Ratio
@@ -75,10 +68,10 @@ A native desktop app with real-time progress updates and professional UI:
 
 ```bash
 # Navigate to project directory
-cd C:\Users\Warren\Projects\ib_breakout_optimizer
+cd path/to/ib_breakout_optimizer
 
 # Install dependencies
-pip install pandas numpy optuna plotly streamlit pyarrow pyyaml requests PySide6 joblib
+pip install pandas numpy optuna plotly pyarrow pyyaml requests PySide6 joblib
 
 # Or use requirements.txt
 pip install -r requirements.txt
@@ -86,7 +79,7 @@ pip install -r requirements.txt
 
 ### Data Setup
 
-Place your historical data files in the data directory (default: `C:\Users\Warren\Downloads`):
+Place your historical data files in the `market_data` directory:
 
 - **NinjaTrader format** (preferred): `TSLA_NT.txt`, `QQQ_NT.txt`
   ```
@@ -107,7 +100,7 @@ Double-click the "IB Breakout Optimizer" shortcut on your desktop.
 
 **Option 2: Command Line**
 ```bash
-cd C:\Users\Warren\Projects\ib_breakout_optimizer
+cd path/to/ib_breakout_optimizer
 python -m desktop_ui.main
 ```
 
@@ -154,15 +147,6 @@ The optimizer uses Two-Phase search (Grid + Bayesian) with memory-mapped arrays 
 - Day-of-week analysis
 - Entry hour analysis
 
-### Web Interface (Alternative)
-
-```bash
-cd C:\Users\Warren\Projects\ib_breakout_optimizer
-streamlit run ui/app.py
-```
-
-Open your browser to `http://localhost:8501`
-
 ### Programmatic Usage
 
 ```python
@@ -170,7 +154,7 @@ from backtester.backtest_runner import BacktestRunner
 from strategy.ib_breakout import StrategyParams
 
 # Create runner
-runner = BacktestRunner(r"C:\Users\Warren\Downloads")
+runner = BacktestRunner("market_data")
 
 # Configure strategy
 params = StrategyParams(
@@ -244,33 +228,23 @@ ib_breakout_optimizer/
 │   ├── two_phase_optimizer.py # Grid + Bayesian hybrid
 │   └── walk_forward.py        # Walk-forward analysis
 │
-├── desktop_ui/                # PySide6 Desktop App (Primary)
+├── desktop_ui/                # PySide6 Desktop App
 │   ├── main.py                # App entry point
 │   ├── main_window.py         # Main window with tabs
-│   ├── tabs/
-│   │   ├── backtest_tab.py    # Backtest configuration
-│   │   ├── optimization_tab.py # Grid search with progress
-│   │   ├── equity_curve_tab.py # Equity/drawdown charts
-│   │   ├── trade_browser_tab.py # Trade list with charts
-│   │   └── ib_analysis_tab.py # IB size/day analysis
-│   ├── workers/
-│   │   ├── backtest_worker.py # Background backtest thread
-│   │   └── optimization_worker.py # Background optimization thread
-│   └── widgets/
-│       ├── metrics_panel.py   # Metric display cards
-│       └── chart_widget.py    # Plotly chart container
-│
-├── ui/                        # Streamlit interface (Alternative)
-│   ├── app.py                 # Main app
-│   ├── pages/                 # UI pages
-│   │   ├── backtest.py
-│   │   ├── trade_browser.py
-│   │   ├── equity_curve.py
-│   │   ├── optimization.py
-│   │   └── results_viewer.py
-│   └── components/            # Reusable components
-│       ├── candlestick_chart.py
-│       └── trade_table.py
+│   ├── tabs/                  # UI tabs
+│   │   ├── optimization_tab.py
+│   │   ├── walk_forward_tab.py
+│   │   ├── portfolio_tab.py
+│   │   ├── forward_tests_tab.py
+│   │   ├── equity_curve_tab.py
+│   │   ├── trade_browser_tab.py
+│   │   ├── ib_analysis_tab.py
+│   │   ├── monitoring_tab.py
+│   │   ├── ml_filter_tab.py
+│   │   ├── saved_tests_tab.py
+│   │   └── download_tab.py
+│   ├── workers/               # Background threads
+│   └── widgets/               # Reusable components
 │
 ├── output/                    # Results storage
 │   └── optimization/          # Saved optimizations
@@ -395,7 +369,6 @@ pandas>=2.0
 numpy>=1.24
 optuna>=3.0
 plotly>=5.0
-streamlit>=1.28
 pyarrow>=12.0
 pyyaml>=6.0
 requests>=2.31

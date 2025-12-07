@@ -189,20 +189,25 @@ class WalkForwardWorker(QThread):
                     f"Period {i+1}/{total_periods}: Testing on {period['test_start'].date()} to {period['test_end'].date()}")
 
                 runner = BacktestRunner(self.data_dir)
-                test_result = runner.run(
+
+                # Convert params dict to StrategyParams
+                from strategy.ib_breakout import StrategyParams
+                strategy_params = StrategyParams(**best_params)
+
+                backtest_result, oos_metrics = runner.run_backtest(
                     ticker=self.ticker,
-                    params=best_params,
+                    params=strategy_params,
                     start_date=period['test_start'],
-                    end_date=period['test_end']
+                    end_date=period['test_end'],
+                    verbose=False
                 )
 
-                trades = test_result.get('trades', [])
-                oos_metrics = test_result.get('metrics', {})
+                trades = backtest_result.trades if backtest_result else []
 
                 # Build equity curve from trades
                 oos_equity = [0]
                 for trade in trades:
-                    oos_equity.append(oos_equity[-1] + trade.get('pnl', 0))
+                    oos_equity.append(oos_equity[-1] + trade.pnl)
 
                 # Shift equity curve to cumulative
                 shifted_equity = [e + cumulative_oos_pnl for e in oos_equity]
@@ -221,9 +226,9 @@ class WalkForwardWorker(QThread):
                     is_pf=is_metrics['pf'],
                     is_win_rate=is_metrics['win_rate'],
                     oos_trades=len(trades),
-                    oos_pnl=oos_metrics.get('total_pnl', 0),
-                    oos_pf=oos_metrics.get('profit_factor', 0),
-                    oos_win_rate=oos_metrics.get('win_rate', 0),
+                    oos_pnl=oos_metrics.total_net_profit if oos_metrics else 0,
+                    oos_pf=oos_metrics.profit_factor if oos_metrics else 0,
+                    oos_win_rate=oos_metrics.percent_profitable if oos_metrics else 0,
                     oos_equity_curve=oos_equity
                 )
 
