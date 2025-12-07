@@ -154,11 +154,19 @@ class ForwardTestsTab(QWidget):
 
         # Ticker selection from saved tests
         ticker_layout = QHBoxLayout()
-        ticker_layout.addWidget(QLabel("From Saved:"))
+        ticker_layout.addWidget(QLabel("Ticker:"))
         self.ticker_combo = QComboBox()
         self.ticker_combo.currentTextChanged.connect(self._on_ticker_selected)
         ticker_layout.addWidget(self.ticker_combo)
         new_test_layout.addLayout(ticker_layout)
+
+        # Optimization selection (when multiple saved for same ticker)
+        opt_layout = QHBoxLayout()
+        opt_layout.addWidget(QLabel("Optimization:"))
+        self.optimization_combo = QComboBox()
+        self.optimization_combo.currentIndexChanged.connect(self._on_optimization_selected)
+        opt_layout.addWidget(self.optimization_combo)
+        new_test_layout.addLayout(opt_layout)
 
         # Show selected params summary
         self.params_label = QLabel("Select a ticker to see parameters")
@@ -416,6 +424,7 @@ class ForwardTestsTab(QWidget):
         """Handle ticker selection."""
         if text == "-- Select Ticker --" or not text:
             self.selected_ticker = None
+            self.optimization_combo.clear()
             self.start_new_btn.setEnabled(False)
             self.params_label.setText("Select a ticker to see parameters")
             return
@@ -427,27 +436,65 @@ class ForwardTestsTab(QWidget):
 
         self.selected_ticker = ticker
 
-        # Get best result for this ticker
+        # Populate optimization combo with all saved results for this ticker
         results_list = self.saved_results.get(ticker, [])
+        self.optimization_combo.clear()
+
         if results_list:
-            best = max(results_list, key=lambda r: r.get('total_pnl', 0))
-            params = best.get('params', {})
+            # Sort by P&L descending (best first)
+            sorted_results = sorted(results_list, key=lambda r: r.get('total_pnl', 0), reverse=True)
 
-            # Show key params
-            direction = params.get('trade_direction', 'both')
-            ib_dur = params.get('ib_duration_minutes', 30)
-            target = params.get('profit_target_percent', 1.0)
-            pnl = best.get('total_pnl', 0)
-            pf = best.get('profit_factor', 0)
+            for i, result in enumerate(sorted_results):
+                pnl = result.get('total_pnl', 0)
+                pf = result.get('profit_factor', 0)
+                params = result.get('params', {})
+                direction = params.get('trade_direction', 'both')
 
-            self.params_label.setText(
-                f"Direction: {direction} | IB: {ib_dur}min | Target: {target:.1f}%\n"
-                f"Backtest: ${pnl:,.0f} | PF: {pf:.2f}"
-            )
-            self.start_new_btn.setEnabled(ticker not in self.forward_tests)
+                # Create descriptive label
+                label = f"${pnl:,.0f} | PF {pf:.2f} | {direction}"
+                if i == 0:
+                    label += " (best)"
+
+                self.optimization_combo.addItem(label, i)  # Store index as data
+
+            # Select best by default
+            self._on_optimization_selected(0)
         else:
             self.params_label.setText("No saved results found")
             self.start_new_btn.setEnabled(False)
+
+    def _on_optimization_selected(self, index: int):
+        """Handle optimization selection from combo."""
+        if index < 0 or not self.selected_ticker:
+            return
+
+        results_list = self.saved_results.get(self.selected_ticker, [])
+        if not results_list:
+            return
+
+        # Get sorted results (same order as combo)
+        sorted_results = sorted(results_list, key=lambda r: r.get('total_pnl', 0), reverse=True)
+
+        if index >= len(sorted_results):
+            return
+
+        result = sorted_results[index]
+        params = result.get('params', {})
+
+        # Show key params
+        direction = params.get('trade_direction', 'both')
+        ib_dur = params.get('ib_duration_minutes', 30)
+        target = params.get('profit_target_percent', 1.0)
+        pnl = result.get('total_pnl', 0)
+        pf = result.get('profit_factor', 0)
+        win_rate = result.get('win_rate', 0)
+        trades = result.get('total_trades', 0)
+
+        self.params_label.setText(
+            f"Direction: {direction} | IB: {ib_dur}min | Target: {target:.1f}%\n"
+            f"P&L: ${pnl:,.0f} | PF: {pf:.2f} | Win: {win_rate:.0f}% | Trades: {trades}"
+        )
+        self.start_new_btn.setEnabled(self.selected_ticker not in self.forward_tests)
 
     def _on_test_selected(self):
         """Handle forward test selection."""
@@ -473,22 +520,33 @@ class ForwardTestsTab(QWidget):
 
         ticker = self.selected_ticker
 
-        # Get best result
+        # Get selected result from combo box
         results_list = self.saved_results.get(ticker, [])
         if not results_list:
             return
 
-        best = max(results_list, key=lambda r: r.get('total_pnl', 0))
+        # Get the selected optimization index
+        opt_index = self.optimization_combo.currentIndex()
+        if opt_index < 0:
+            opt_index = 0
+
+        # Get sorted results (same order as combo)
+        sorted_results = sorted(results_list, key=lambda r: r.get('total_pnl', 0), reverse=True)
+
+        if opt_index >= len(sorted_results):
+            return
+
+        selected_result = sorted_results[opt_index]
 
         # Create new forward test
         forward_test = ForwardTest(
             ticker=ticker,
-            params=best.get('params', {}),
+            params=selected_result.get('params', {}),
             created_date=datetime.now().isoformat(),
-            backtest_pnl=best.get('total_pnl', 0),
-            backtest_trades=best.get('total_trades', 0),
-            backtest_pf=best.get('profit_factor', 0),
-            backtest_win_rate=best.get('win_rate', 0),
+            backtest_pnl=selected_result.get('total_pnl', 0),
+            backtest_trades=selected_result.get('total_trades', 0),
+            backtest_pf=selected_result.get('profit_factor', 0),
+            backtest_win_rate=selected_result.get('win_rate', 0),
             forward_results=[]
         )
 
