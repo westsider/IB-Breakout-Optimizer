@@ -57,7 +57,7 @@ This file provides context and guidance for Claude Code when working with this p
 
 **Desktop App (PySide6) - Primary**
 - Native desktop application with professional dark theme
-- 10 tabs: Optimization, Portfolio, Forward Tests, Equity Curve, Trade Browser, IB Analysis, Monitoring, ML Filter, Saved Tests, Download
+- 11 tabs: Optimization, Walk-Forward, Portfolio, Forward Tests, Equity Curve, Trade Browser, IB Analysis, Monitoring, ML Filter, Saved Tests, Download
 - QThread workers for non-blocking background processing
 - Live progress updates with elapsed time and ETA
 - Two-phase optimization (Grid + Bayesian) with presets (quick, standard, full, thorough)
@@ -83,6 +83,15 @@ This file provides context and guidance for Claude Code when working with this p
   - Per-ticker breakdown table with contribution percentages
   - Individual ticker curves overlaid on combined chart
   - **Monthly P&L bar chart** showing gain/loss per month with win/loss month stats
+- **Walk-Forward Analysis tab** for out-of-sample strategy validation
+  - Rolling optimization with configurable training window (3, 6, 9, 12 months)
+  - Configurable test window (1, 2, 4 weeks)
+  - Trains on historical data, tests "blind" on following period
+  - Aggregates all out-of-sample results into single equity curve
+  - Key metrics: OOS P&L, OOS Profit Factor, Efficiency Ratio (OOS/IS)
+  - Period win rate shows % of test periods that were profitable
+  - In-sample vs out-of-sample comparison bar chart
+  - Same filters and objectives as Optimization tab
 - **Forward Tests tab** for live market validation of saved optimizations
   - Start forward tests from saved optimization results
   - Run periodic forward tests as new market data is loaded
@@ -264,6 +273,7 @@ C:\Users\Warren\Projects\ib_breakout_optimizer\
 │   │   ├── ml_filter_tab.py   # Phase 6 ML filter training
 │   │   ├── saved_tests_tab.py # Saved test results storage
 │   │   ├── forward_tests_tab.py # Forward testing with live data
+│   │   ├── walk_forward_tab.py # Walk-forward analysis with OOS testing
 │   │   └── download_tab.py    # Polygon.io data download + rebuild stats
 │   ├── workers/
 │   │   ├── backtest_worker.py # Background backtest thread
