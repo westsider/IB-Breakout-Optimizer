@@ -282,8 +282,34 @@ class DownloadTab(QWidget):
         self.cancel_btn.clicked.connect(self._cancel_download)
         button_layout.addWidget(self.cancel_btn)
 
+        # Separator
+        sep = QLabel("|")
+        sep.setStyleSheet("color: #444444;")
+        button_layout.addWidget(sep)
+
+        # Rebuild stats button
+        self.rebuild_stats_btn = QPushButton("Rebuild Stats")
+        self.rebuild_stats_btn.setMinimumHeight(36)
+        self.rebuild_stats_btn.setToolTip(
+            "Rebuild distribution statistics (gap %, range %) for this ticker.\n"
+            "Stats are used by statistical filters in the optimizer."
+        )
+        self.rebuild_stats_btn.clicked.connect(self._rebuild_stats)
+        button_layout.addWidget(self.rebuild_stats_btn)
+
         button_layout.addStretch()
         layout.addWidget(button_frame)
+
+        # Distribution Stats section
+        stats_group = QGroupBox("Distribution Statistics")
+        stats_layout = QVBoxLayout(stats_group)
+
+        self.stats_label = QLabel("No stats cached for this ticker")
+        self.stats_label.setStyleSheet("color: #888888;")
+        self.stats_label.setWordWrap(True)
+        stats_layout.addWidget(self.stats_label)
+
+        layout.addWidget(stats_group)
 
         # Progress section
         progress_frame = QFrame()
@@ -383,6 +409,9 @@ class DownloadTab(QWidget):
 
             # Update preview table with daily summaries
             self._update_preview_table(data_file)
+
+            # Update distribution stats display
+            self._update_stats_display()
 
         except Exception as e:
             self.data_info_label.setText(f"(error: {e})")
@@ -574,3 +603,81 @@ class DownloadTab(QWidget):
         """Update data directory."""
         self.data_dir = path
         self._update_data_info()
+
+    def _rebuild_stats(self):
+        """Rebuild distribution statistics for the current ticker."""
+        from data.distribution_stats import DistributionStatsCalculator
+
+        ticker = self.ticker_combo.currentText().strip().upper()
+        if not ticker:
+            return
+
+        self.progress_label.setText(f"Rebuilding distribution stats for {ticker}...")
+        self.progress_label.setStyleSheet("color: #2a82da;")
+        self.rebuild_stats_btn.setEnabled(False)
+
+        # Process events to update UI
+        from PySide6.QtWidgets import QApplication
+        QApplication.processEvents()
+
+        try:
+            calc = DistributionStatsCalculator(self.data_dir)
+            calc.invalidate_cache(ticker)  # Force recalculation
+            stats = calc.get_stats(ticker, force_recalc=True)
+
+            if stats:
+                self.progress_label.setText(f"Stats rebuilt for {ticker} ({stats.n_trading_days} trading days)")
+                self.progress_label.setStyleSheet("color: #00ff00;")
+                self._update_stats_display(stats)
+            else:
+                self.progress_label.setText(f"Could not compute stats for {ticker} (no data?)")
+                self.progress_label.setStyleSheet("color: #ff4444;")
+
+        except Exception as e:
+            self.progress_label.setText(f"Error rebuilding stats: {e}")
+            self.progress_label.setStyleSheet("color: #ff4444;")
+
+        self.rebuild_stats_btn.setEnabled(True)
+
+    def _update_stats_display(self, stats=None):
+        """Update the distribution stats display."""
+        from data.distribution_stats import DistributionStatsCalculator
+
+        ticker = self.ticker_combo.currentText().strip().upper()
+        if not ticker:
+            self.stats_label.setText("Select a ticker to view stats")
+            return
+
+        if stats is None:
+            try:
+                calc = DistributionStatsCalculator(self.data_dir)
+                stats = calc.get_stats(ticker)
+            except Exception:
+                stats = None
+
+        if stats is None:
+            self.stats_label.setText(
+                f"No stats cached for {ticker}. Click 'Rebuild Stats' to compute."
+            )
+            self.stats_label.setStyleSheet("color: #888888;")
+            return
+
+        # Format the stats display
+        gap = stats.gap_stats
+        rng = stats.range_stats
+
+        stats_text = (
+            f"<b>{ticker}</b> - {stats.n_trading_days} trading days (computed {stats.computed_date[:10]})<br><br>"
+            f"<b>Gap % Distribution</b> (open vs prior close):<br>"
+            f"&nbsp;&nbsp;Mean: {gap.mean:.2f}% | Std: {gap.std:.2f}%<br>"
+            f"&nbsp;&nbsp;Middle 68%: {gap.p16:.2f}% to {gap.p84:.2f}%<br>"
+            f"&nbsp;&nbsp;Quartiles: {gap.p25:.2f}% (25th) | {gap.median:.2f}% (50th) | {gap.p75:.2f}% (75th)<br>"
+            f"&nbsp;&nbsp;Extremes: {gap.p5:.2f}% (5th) | {gap.p95:.2f}% (95th)<br><br>"
+            f"<b>Daily Range % Distribution</b> (high-low):<br>"
+            f"&nbsp;&nbsp;Mean: {rng.mean:.2f}% | Std: {rng.std:.2f}%<br>"
+            f"&nbsp;&nbsp;Middle 68%: {rng.p16:.2f}% to {rng.p84:.2f}%<br>"
+            f"&nbsp;&nbsp;Percentiles: {rng.p50:.2f}% (50th) | {rng.p68:.2f}% (68th) | {rng.p90:.2f}% (90th)"
+        )
+
+        self.stats_label.setText(stats_text)
+        self.stats_label.setStyleSheet("color: #cccccc;")

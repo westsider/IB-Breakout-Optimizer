@@ -316,112 +316,60 @@ class ParameterSpace:
                 enabled=False  # Enable for day-of-week optimization
             ))
 
-        # Gap Filter Parameters
+        # Statistical Gap Filter Parameters
+        # Uses pre-computed distribution statistics per ticker
         self.add_parameter(ParameterConfig(
-            name="gap_filter_enabled",
-            param_type=ParameterType.BOOL,
-            default=False,
-            enabled=False
-        ))
-
-        self.add_parameter(ParameterConfig(
-            name="min_gap_percent",
-            param_type=ParameterType.FLOAT,
-            default=-10.0,
-            min_value=-5.0,
-            max_value=0.0,
-            step=1.0,
-            enabled=False,
-            condition="gap_filter_enabled == True"
-        ))
-
-        self.add_parameter(ParameterConfig(
-            name="max_gap_percent",
-            param_type=ParameterType.FLOAT,
-            default=10.0,
-            min_value=0.0,
-            max_value=5.0,
-            step=1.0,
-            enabled=False,
-            condition="gap_filter_enabled == True"
-        ))
-
-        self.add_parameter(ParameterConfig(
-            name="gap_direction_filter",
+            name="gap_filter_mode",
             param_type=ParameterType.CATEGORICAL,
             default="any",
-            choices=["any", "gap_up_only", "gap_down_only", "with_trade"],
-            enabled=False,
-            condition="gap_filter_enabled == True"
+            choices=[
+                "any",              # No filter
+                "middle_68",        # Only trade gaps within 1 std dev (normal days)
+                "exclude_middle_68", # Only trade extreme gap days
+                "directional",      # Gap up = longs only, gap down = shorts only
+                "reverse_directional"  # Gap up = shorts (fade), gap down = longs
+            ],
+            enabled=False
         ))
 
-        # Prior Days Trend Filter Parameters
+        # Trend Filter Parameters
+        # Filters trades based on prior days trend direction
         self.add_parameter(ParameterConfig(
-            name="prior_days_filter_enabled",
-            param_type=ParameterType.BOOL,
-            default=False,
+            name="trend_filter_mode",
+            param_type=ParameterType.CATEGORICAL,
+            default="any",
+            choices=[
+                "any",          # No filter
+                "with_trend",   # Bullish trend = longs only, Bearish = shorts only
+                "counter_trend" # Bullish = shorts (mean reversion), Bearish = longs
+            ],
             enabled=False
         ))
 
         self.add_parameter(ParameterConfig(
-            name="prior_days_lookback",
+            name="trend_lookback_days",
             param_type=ParameterType.INT,
             default=3,
-            min_value=1,
+            min_value=2,
             max_value=5,
             step=1,
-            enabled=False,
-            condition="prior_days_filter_enabled == True"
-        ))
-
-        self.add_parameter(ParameterConfig(
-            name="prior_days_trend",
-            param_type=ParameterType.CATEGORICAL,
-            default="any",
-            choices=["any", "bullish", "bearish", "with_trade"],
-            enabled=False,
-            condition="prior_days_filter_enabled == True"
-        ))
-
-        # Daily Range / Volatility Filter Parameters
-        self.add_parameter(ParameterConfig(
-            name="daily_range_filter_enabled",
-            param_type=ParameterType.BOOL,
-            default=False,
             enabled=False
         ))
 
+        # Statistical Range (Volatility) Filter Parameters
+        # Uses pre-computed distribution statistics per ticker
         self.add_parameter(ParameterConfig(
-            name="min_avg_daily_range_percent",
-            param_type=ParameterType.FLOAT,
-            default=0.0,
-            min_value=0.0,
-            max_value=3.0,
-            step=0.5,
-            enabled=False,
-            condition="daily_range_filter_enabled == True"
-        ))
-
-        self.add_parameter(ParameterConfig(
-            name="max_avg_daily_range_percent",
-            param_type=ParameterType.FLOAT,
-            default=100.0,
-            min_value=3.0,
-            max_value=10.0,
-            step=1.0,
-            enabled=False,
-            condition="daily_range_filter_enabled == True"
-        ))
-
-        self.add_parameter(ParameterConfig(
-            name="daily_range_lookback",
-            param_type=ParameterType.INT,
-            default=5,
-            min_value=3,
-            max_value=10,
-            step=1,
-            enabled=False,
-            condition="daily_range_filter_enabled == True"
+            name="range_filter_mode",
+            param_type=ParameterType.CATEGORICAL,
+            default="any",
+            choices=[
+                "any",              # No filter
+                "middle_68",        # Only trade when range is within 1 std dev (normal vol)
+                "above_68",         # Only trade high volatility days (> 68th percentile)
+                "below_median",     # Only trade low volatility days
+                "middle_68_or_below"  # Trade if normal OR below normal volatility
+            ],
+            enabled=False
         ))
 
     def add_parameter(self, config: ParameterConfig):
@@ -503,23 +451,6 @@ class ParameterSpace:
         # If max_bars_enabled is False, use default for max_bars
         if not result.get("max_bars_enabled", False):
             result["max_bars"] = self.parameters["max_bars"].default
-
-        # If gap_filter_enabled is False, use defaults for gap parameters
-        if not result.get("gap_filter_enabled", False):
-            result["min_gap_percent"] = self.parameters["min_gap_percent"].default
-            result["max_gap_percent"] = self.parameters["max_gap_percent"].default
-            result["gap_direction_filter"] = self.parameters["gap_direction_filter"].default
-
-        # If prior_days_filter_enabled is False, use defaults
-        if not result.get("prior_days_filter_enabled", False):
-            result["prior_days_lookback"] = self.parameters["prior_days_lookback"].default
-            result["prior_days_trend"] = self.parameters["prior_days_trend"].default
-
-        # If daily_range_filter_enabled is False, use defaults
-        if not result.get("daily_range_filter_enabled", False):
-            result["min_avg_daily_range_percent"] = self.parameters["min_avg_daily_range_percent"].default
-            result["max_avg_daily_range_percent"] = self.parameters["max_avg_daily_range_percent"].default
-            result["daily_range_lookback"] = self.parameters["daily_range_lookback"].default
 
         return result
 
@@ -686,6 +617,37 @@ OPTIMIZATION_PRESETS = {
             "min_ib_range_percent": 0.5,        # 3 values: 0.0, 0.5, 1.0
         }
         # 4 * 9 * 2 * 3 * 2 * 2 * 3 = 2,592 combinations
+    },
+    "statistical_filters": {
+        "description": "Statistical filters optimization - tests gap, trend, and range filters",
+        "enabled": [
+            "ib_duration_minutes",
+            "profit_target_percent",
+            "trade_direction",
+            "gap_filter_mode",
+            "trend_filter_mode",
+            "range_filter_mode"
+        ],
+        "step_overrides": {
+            "ib_duration_minutes": 15,          # 4 values: 15, 30, 45, 60
+            "profit_target_percent": 0.5,       # 4 values: 0.5, 1.0, 1.5, 2.0
+        }
+        # 4 * 4 * 3 * 5 * 3 * 5 = 3,600 combinations
+    },
+    "quick_filters": {
+        "description": "Quick filter test - core params + statistical filters",
+        "enabled": [
+            "ib_duration_minutes",
+            "profit_target_percent",
+            "trade_direction",
+            "gap_filter_mode",
+            "range_filter_mode"
+        ],
+        "step_overrides": {
+            "ib_duration_minutes": 30,          # 2 values: 30, 60
+            "profit_target_percent": 0.5,       # 4 values: 0.5, 1.0, 1.5, 2.0
+        }
+        # 2 * 4 * 3 * 5 * 5 = 600 combinations
     }
 }
 

@@ -37,18 +37,27 @@ class MetricCard(QFrame):
 
             # Value inline
             self.value_label = QLabel(value)
-            self.value_label.setStyleSheet("font-size: 12px; font-weight: bold;")
+            self.value_label.setStyleSheet("font-size: 12px; font-weight: bold; color: #ffffff;")
             layout.addWidget(self.value_label)
         else:
-            # Standard vertical card style
+            # Standard vertical card style - use child selector to avoid conflicts
             self.setStyleSheet("""
                 MetricCard {
                     background-color: #252525;
                     border: 1px solid #333333;
                     border-radius: 6px;
-                    padding: 8px;
+                }
+                MetricCard QLabel#metric-value {
+                    font-size: 18px;
+                    font-weight: bold;
+                    color: #ffffff;
+                }
+                MetricCard QLabel#metric-label {
+                    font-size: 11px;
+                    color: #888888;
                 }
             """)
+            self.setMinimumSize(100, 60)
 
             layout = QVBoxLayout(self)
             layout.setSpacing(4)
@@ -69,16 +78,13 @@ class MetricCard(QFrame):
     def set_value(self, value: str, color: str = None):
         """Update the metric value."""
         self.value_label.setText(value)
+        # Always set inline style to ensure it overrides parent stylesheet
         if self.compact:
-            if color:
-                self.value_label.setStyleSheet(f"color: {color}; font-size: 12px; font-weight: bold;")
-            else:
-                self.value_label.setStyleSheet("font-size: 12px; font-weight: bold;")
+            style_color = color if color else "#ffffff"
+            self.value_label.setStyleSheet(f"color: {style_color}; font-size: 12px; font-weight: bold;")
         else:
-            if color:
-                self.value_label.setStyleSheet(f"color: {color}; font-size: 18px; font-weight: bold;")
-            else:
-                self.value_label.setStyleSheet("font-size: 18px; font-weight: bold;")
+            style_color = color if color else "#ffffff"
+            self.value_label.setStyleSheet(f"color: {style_color}; font-size: 18px; font-weight: bold;")
 
 
 class MetricsPanel(QWidget):

@@ -233,57 +233,44 @@ class MLFilterTab(QWidget):
         layout = QVBoxLayout(self)
         layout.setSpacing(12)
 
-        # Top section: Training controls
+        # Top section: Training controls (simplified)
         top_layout = QHBoxLayout()
 
-        # Data settings
-        data_group = QGroupBox("Training Data")
-        data_layout = QGridLayout(data_group)
-        data_layout.setSpacing(8)
-
-        data_layout.addWidget(QLabel("Ticker:"), 0, 0)
+        # Hidden fields for params (still used internally but not shown)
         self.ticker_combo = QComboBox()
         self.ticker_combo.addItems(["TSLA", "QQQ", "AAPL", "NVDA", "MSFT", "SPY", "AMD"])
-        data_layout.addWidget(self.ticker_combo, 0, 1)
+        self.ticker_combo.setVisible(False)
 
-        data_layout.addWidget(QLabel("IB Duration:"), 1, 0)
         self.ib_duration_spin = QSpinBox()
         self.ib_duration_spin.setRange(15, 60)
         self.ib_duration_spin.setValue(30)
-        self.ib_duration_spin.setSuffix(" min")
-        data_layout.addWidget(self.ib_duration_spin, 1, 1)
+        self.ib_duration_spin.setVisible(False)
 
-        data_layout.addWidget(QLabel("Direction:"), 2, 0)
         self.direction_combo = QComboBox()
         self.direction_combo.addItems(["both", "long_only", "short_only"])
-        data_layout.addWidget(self.direction_combo, 2, 1)
+        self.direction_combo.setVisible(False)
 
-        top_layout.addWidget(data_group)
-
-        # Training settings
-        train_group = QGroupBox("Training Settings")
-        train_layout = QGridLayout(train_group)
-        train_layout.setSpacing(8)
-
-        train_layout.addWidget(QLabel("Profit Target:"), 0, 0)
         self.profit_target_spin = QDoubleSpinBox()
         self.profit_target_spin.setRange(0.3, 3.0)
         self.profit_target_spin.setValue(1.0)
-        self.profit_target_spin.setSingleStep(0.1)
-        self.profit_target_spin.setSuffix("%")
-        train_layout.addWidget(self.profit_target_spin, 0, 1)
+        self.profit_target_spin.setVisible(False)
 
-        train_layout.addWidget(QLabel("Model Type:"), 1, 0)
+        # Model settings (the only visible config)
+        model_group = QGroupBox("Model Settings")
+        model_layout = QGridLayout(model_group)
+        model_layout.setSpacing(8)
+
+        model_layout.addWidget(QLabel("Model Type:"), 0, 0)
         self.model_type_combo = QComboBox()
         self.model_type_combo.addItems(["Ensemble", "LightGBM"])
         self.model_type_combo.setToolTip(
             "Ensemble: LightGBM + Random Forest + Logistic Regression (more robust)\n"
             "LightGBM: Single model (faster, simpler)"
         )
-        train_layout.addWidget(self.model_type_combo, 1, 1)
+        model_layout.addWidget(self.model_type_combo, 0, 1)
 
         # Probability threshold slider
-        train_layout.addWidget(QLabel("Threshold:"), 2, 0)
+        model_layout.addWidget(QLabel("Threshold:"), 1, 0)
         threshold_layout = QHBoxLayout()
         self.threshold_slider = QSlider(Qt.Horizontal)
         self.threshold_slider.setRange(50, 70)  # 0.50 to 0.70
@@ -300,20 +287,22 @@ class MLFilterTab(QWidget):
             "Lower = more trades but may include weaker signals"
         )
         threshold_layout.addWidget(self.threshold_label)
-        train_layout.addLayout(threshold_layout, 2, 1)
+        model_layout.addLayout(threshold_layout, 1, 1)
 
-        top_layout.addWidget(train_group)
+        top_layout.addWidget(model_group)
 
         # Actions
         actions_group = QGroupBox("Actions")
         actions_layout = QVBoxLayout(actions_group)
 
+        # Hidden train button (kept for internal use)
         self.train_button = QPushButton("Train Model")
-        self.train_button.setObjectName("primary")
+        self.train_button.setVisible(False)
         self.train_button.clicked.connect(self._train_model)
         actions_layout.addWidget(self.train_button)
 
         self.train_from_best_button = QPushButton("Train from Best")
+        self.train_from_best_button.setObjectName("primary")
         self.train_from_best_button.setToolTip(
             "Train using best parameters from optimization.\n"
             "Run optimization first, then click this button."
@@ -366,7 +355,7 @@ class MLFilterTab(QWidget):
         status_layout = QHBoxLayout(status_frame)
         status_layout.setContentsMargins(8, 4, 8, 4)
 
-        self.status_label = QLabel("Ready - Select ticker and click 'Train Model'")
+        self.status_label = QLabel("Run optimization first, then use 'Train from Best' to train ML model")
         self.status_label.setStyleSheet("color: #888888;")
         status_layout.addWidget(self.status_label)
 
@@ -807,9 +796,10 @@ class MLFilterTab(QWidget):
         target = params.get('profit_target_percent', 1.0)
         win_rate = params.get('win_rate', 0)
 
+        # win_rate comes as 0-100 (percent), not 0-1, so don't use :.0%
         self.optimizer_params_label.setText(
             f"Params from optimization: {ticker}, {ib_dur}min IB, "
-            f"{direction}, {target:.1f}% target, {win_rate:.0%} win rate"
+            f"{direction}, {target:.1f}% target, {win_rate:.0f}% win rate"
         )
         self.optimizer_params_frame.setVisible(True)
 

@@ -16,6 +16,7 @@ from desktop_ui.tabs.equity_curve_tab import EquityCurveTab
 from desktop_ui.tabs.download_tab import DownloadTab
 from desktop_ui.tabs.monitoring_tab import MonitoringTab
 from desktop_ui.tabs.ml_filter_tab import MLFilterTab
+from desktop_ui.tabs.saved_tests_tab import SavedTestsTab
 from desktop_ui.workers.backtest_worker import BacktestWorker
 
 
@@ -118,10 +119,13 @@ class MainWindow(QMainWindow):
         self.monitoring_tab = MonitoringTab(self.data_dir)
         self.ml_filter_tab = MLFilterTab(self.data_dir, self.output_dir)
         self.download_tab = DownloadTab(self.data_dir)
+        self.saved_tests_tab = SavedTestsTab(self.output_dir)
 
         # Connect tabs for sharing data
         self.optimization_tab.optimization_complete.connect(self._on_optimization_complete)
         self.optimization_tab.result_double_clicked.connect(self._on_result_double_clicked)
+        self.optimization_tab.save_test_requested.connect(self._on_save_test_requested)
+        self.saved_tests_tab.load_params_requested.connect(self._on_load_saved_params)
 
         # Backtest worker for populating other tabs
         self.backtest_worker = None
@@ -133,6 +137,7 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.ib_analysis_tab, "IB Analysis")
         self.tabs.addTab(self.monitoring_tab, "Monitoring")
         self.tabs.addTab(self.ml_filter_tab, "ML Filter")
+        self.tabs.addTab(self.saved_tests_tab, "Saved Tests")
         self.tabs.addTab(self.download_tab, "Download")
 
         # Restore last active tab
@@ -204,6 +209,7 @@ class MainWindow(QMainWindow):
             # Update tabs
             self.optimization_tab.set_output_dir(directory)
             self.ml_filter_tab.set_output_dir(directory)
+            self.saved_tests_tab.set_output_dir(directory)
 
             self.status_label.setText(f"Output directory set to: {directory}")
 
@@ -214,13 +220,13 @@ class MainWindow(QMainWindow):
         )
 
         # Send best result to ML Filter tab for training
-        best_result = results.get('best_result')
+        best_params = results.get('best_params', {})
         ticker = results.get('ticker', 'TSLA')
 
-        if best_result:
-            # Extract params from the best result
-            best_params = best_result.get('params', {})
-            best_params['win_rate'] = best_result.get('win_rate', 0)
+        if best_params:
+            # Add win rate from best_metrics if available
+            best_metrics = results.get('best_metrics', {})
+            best_params['win_rate'] = best_metrics.get('win_rate', 0)
 
             # Send to ML tab
             self.ml_filter_tab.set_optimizer_params(best_params, ticker)
@@ -268,6 +274,37 @@ class MainWindow(QMainWindow):
         self.status_label.setText(f"Backtest error: {error_msg[:100]}")
         self.status_label.setStyleSheet("color: #ff4444;")
         print(f"Backtest error: {error_msg}")
+
+    def _on_load_saved_params(self, params: dict, ticker: str):
+        """Handle request to load saved params to optimizer."""
+        # Switch to Optimization tab and load params
+        self.tabs.setCurrentWidget(self.optimization_tab)
+        self.optimization_tab.load_params(params, ticker)
+        self.status_label.setText(f"Loaded saved parameters for {ticker}")
+        self.status_label.setStyleSheet("color: #00ff00;")
+
+    def _on_save_test_requested(self, result_dict: dict):
+        """Handle request to save current test result."""
+        ticker = result_dict.get('ticker', 'UNKNOWN')
+
+        is_new_best = self.saved_tests_tab.save_test_result(
+            ticker=ticker,
+            total_pnl=result_dict.get('total_pnl', 0),
+            profit_factor=result_dict.get('profit_factor', 0),
+            win_rate=result_dict.get('win_rate', 0),
+            total_trades=result_dict.get('total_trades', 0),
+            max_drawdown=result_dict.get('max_drawdown', 0),
+            sharpe_ratio=result_dict.get('sharpe_ratio', 0),
+            params=result_dict.get('params', {}),
+            equity_curve=result_dict.get('equity_curve', [])
+        )
+
+        if is_new_best:
+            self.status_label.setText(f"NEW BEST for {ticker}! Saved to Saved Tests")
+            self.status_label.setStyleSheet("color: #00ff00;")
+        else:
+            self.status_label.setText(f"Saved test for {ticker}")
+            self.status_label.setStyleSheet("color: #2a82da;")
 
     def _show_about(self):
         """Show about dialog."""

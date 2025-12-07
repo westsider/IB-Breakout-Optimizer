@@ -8,7 +8,7 @@ This file provides context and guidance for Claude Code when working with this p
 
 **Purpose**: Custom Python backtester with continuous learning/self-optimization for the IB (Initial Balance) Breakout trading strategy. Optimized parameters are exported to NinjaTrader for live trading.
 
-**Status**: Phase 6 complete - ML Filter with ensemble models, insights generator, and optimizer integration.
+**Status**: Phase 6 complete - ML Filter with ensemble models, insights generator, and optimizer integration. Statistical filters and Saved Tests tab added.
 
 ---
 
@@ -47,12 +47,17 @@ This file provides context and guidance for Claude Code when working with this p
   - Prior days trend filter (last N days bullish/bearish bias)
   - Daily range % filter (volatility/ATR filter)
   - "with_trade" mode aligns filter direction with trade direction
+- **Statistical filters** using pre-computed normal distribution percentiles:
+  - Gap filter modes: any, middle_68, exclude_middle_68, directional, reverse_directional
+  - Trend filter modes: any, with_trend, counter_trend
+  - Range filter modes: any, middle_68, above_68, below_median, middle_68_or_below
+  - Distribution stats cached per ticker in `data/stats_cache/`
 
 #### Phase 4: Interactive UI (Complete)
 
 **Desktop App (PySide6) - Primary**
 - Native desktop application with professional dark theme
-- 7 tabs: Optimization, Equity Curve, Trade Browser, IB Analysis, Monitoring, ML Filter, Download
+- 8 tabs: Optimization, Equity Curve, Trade Browser, IB Analysis, Monitoring, ML Filter, Saved Tests, Download
 - QThread workers for non-blocking background processing
 - Live progress updates with elapsed time and ETA
 - Two-phase optimization (Grid + Bayesian) with presets (quick, standard, full, thorough)
@@ -62,6 +67,13 @@ This file provides context and guidance for Claude Code when working with this p
 - Desktop shortcut and batch file launcher
 - K-Ratio optimization objective for smooth equity curves
 - Double-click optimization result to populate Trade Browser, Equity Curve, IB Analysis, and Monitoring tabs
+- **Saved Tests tab** for storing and reviewing best results per instrument
+  - Results persisted to `output/saved_tests/saved_results.json`
+  - Save button in Optimization tab to save current best
+  - Shows parameters, equity curve, P&L, PF, Win%, Sharpe
+  - Load saved params back to optimizer for re-testing
+- **Statistical filter dropdowns** in Optimization tab for gap, trend, and range filters
+- **Rebuild Stats button** in Download tab to recompute distribution stats after new data
 
 **Streamlit App - Alternative**
 - Streamlit app scaffold (`ui/app.py`)
@@ -176,7 +188,8 @@ C:\Users\Warren\Projects\ib_breakout_optimizer\
 │   ├── data_loader.py         # CSV/NT file loader
 │   ├── cache_manager.py       # Parquet caching
 │   ├── session_builder.py     # Trading session construction
-│   └── data_types.py          # Bar, Session, Trade dataclasses
+│   ├── data_types.py          # Bar, Session, Trade dataclasses
+│   └── distribution_stats.py  # Statistical distribution calculator (gap%, range%)
 │
 ├── strategy/                  # Strategy logic
 │   ├── ib_calculator.py       # IB high/low/range calculation
@@ -227,7 +240,8 @@ C:\Users\Warren\Projects\ib_breakout_optimizer\
 │   │   ├── ib_analysis_tab.py # IB size/day analysis
 │   │   ├── monitoring_tab.py  # Phase 5 monitoring dashboard
 │   │   ├── ml_filter_tab.py   # Phase 6 ML filter training
-│   │   └── download_tab.py    # Polygon.io data download
+│   │   ├── saved_tests_tab.py # Saved test results storage
+│   │   └── download_tab.py    # Polygon.io data download + rebuild stats
 │   ├── workers/
 │   │   ├── backtest_worker.py # Background backtest thread
 │   │   └── optimization_worker.py # Background optimization thread
@@ -250,7 +264,8 @@ C:\Users\Warren\Projects\ib_breakout_optimizer\
 │       └── trade_table.py         # Trade list utilities
 │
 ├── output/                    # Results storage
-│   └── optimization/          # Saved optimization results
+│   ├── optimization/          # Saved optimization results
+│   └── saved_tests/           # Saved test results (JSON)
 │
 ├── scripts/                   # CLI tools
 │   ├── run_backtest.py
@@ -343,6 +358,16 @@ Key parameters (all optimizable):
 | `daily_range_filter_enabled` | False | Filter by daily range % |
 | `min_avg_daily_range_percent` | 0.0 | Minimum avg daily range required |
 | `daily_range_lookback` | 5 | Days to average for range |
+
+**Statistical Filter Parameters** (mode-based, using distribution percentiles):
+
+| Parameter | Default | Options |
+|-----------|---------|---------|
+| `gap_filter_mode` | "any" | any, middle_68, exclude_middle_68, directional, reverse_directional |
+| `trend_filter_mode` | "any" | any, with_trend, counter_trend |
+| `range_filter_mode` | "any" | any, middle_68, above_68, below_median, middle_68_or_below |
+
+Statistical filters use pre-computed normal distribution percentiles (p16, p50, p68, p84) from historical data to determine if today's gap/range is "normal" or "extreme".
 
 ---
 

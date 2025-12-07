@@ -23,6 +23,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from data.data_loader import DataLoader
 from data.session_builder import SessionBuilder
 from data.data_types import Bar
+from data.distribution_stats import DistributionStatsCalculator
 from metrics.performance_metrics import PerformanceMetrics
 from optimization.parameter_space import ParameterSpace, create_parameter_space
 from optimization.mmap_data import MMapDataManager, MMapArrayPaths, load_mmap_arrays
@@ -143,13 +144,22 @@ def _mmap_backtest_worker(
     mmap_paths_dict: Dict[str, Any],
     ticker: str,
     objective: str,
-    min_trades: int = 10
+    min_trades: int = 10,
+    dist_stats: Optional[Dict[str, float]] = None
 ) -> OptimizationResult:
     """
     Worker function for parallel backtest using memory-mapped arrays.
 
     This function is called in worker processes. It loads the mmap arrays
     (which are shared, not copied) and runs a single backtest.
+
+    Args:
+        params: Strategy parameters
+        mmap_paths_dict: Paths to memory-mapped arrays
+        ticker: Ticker symbol
+        objective: Optimization objective
+        min_trades: Minimum trades required
+        dist_stats: Pre-computed distribution statistics (gap_p16, gap_p84, etc.)
     """
     from numba import njit, prange
     import warnings
@@ -188,19 +198,27 @@ def _mmap_backtest_worker(
     break_even_pct = params.get('break_even_pct', 0.5)
     use_qqq_filter = params.get('use_qqq_filter', False)
 
-    # New filter parameters
-    gap_filter_enabled = params.get('gap_filter_enabled', False)
-    min_gap_percent = params.get('min_gap_percent', -10.0)
-    max_gap_percent = params.get('max_gap_percent', 10.0)
-    gap_direction_filter = params.get('gap_direction_filter', 'any')
+    # Statistical filter parameters (new mode-based filters)
+    gap_filter_mode = params.get('gap_filter_mode', 'any')
+    trend_filter_mode = params.get('trend_filter_mode', 'any')
+    trend_lookback_days = params.get('trend_lookback_days', 3)
+    range_filter_mode = params.get('range_filter_mode', 'any')
 
-    prior_days_filter_enabled = params.get('prior_days_filter_enabled', False)
-    prior_days_lookback = params.get('prior_days_lookback', 3)
-    prior_days_trend = params.get('prior_days_trend', 'any')
+    # Extract distribution stats thresholds (if provided)
+    if dist_stats:
+        gap_p16 = dist_stats.get('gap_p16', -999)
+        gap_p84 = dist_stats.get('gap_p84', 999)
+        range_p16 = dist_stats.get('range_p16', 0)
+        range_p84 = dist_stats.get('range_p84', 999)
+        range_p50 = dist_stats.get('range_p50', 0)
+        range_p68 = dist_stats.get('range_p68', 999)
+    else:
+        # Default thresholds if no stats (effectively disables statistical filters)
+        gap_p16, gap_p84 = -999, 999
+        range_p16, range_p84, range_p50, range_p68 = 0, 999, 0, 999
 
-    daily_range_filter_enabled = params.get('daily_range_filter_enabled', False)
-    min_avg_daily_range = params.get('min_avg_daily_range_percent', 0.0)
-    max_avg_daily_range = params.get('max_avg_daily_range_percent', 100.0)
+    # Legacy filter parameters (keep for backwards compatibility)
+    prior_days_lookback = trend_lookback_days
     daily_range_lookback = params.get('daily_range_lookback', 5)
 
     # Parse max_breakout_time (e.g., "14:00" -> hour=14, minute=0)
@@ -476,56 +494,6 @@ def _mmap_backtest_worker(
             found_breakout = True  # Skip this day
             continue
 
-        # =====================================================================
-        # NEW FILTERS - Gap, Prior Days Trend, Daily Range
-        # =====================================================================
-
-        # Gap filter
-        if gap_filter_enabled:
-            day_gap = gap_percent[date_idx]
-
-            # Check gap bounds
-            if day_gap < min_gap_percent or day_gap > max_gap_percent:
-                found_breakout = True  # Skip this day
-                continue
-
-            # Check gap direction filter (applied later when we know trade direction)
-            # For now just note if it's a gap up or gap down
-            is_gap_up = day_gap > 0
-            is_gap_down = day_gap < 0
-
-            if gap_direction_filter == "gap_up_only" and not is_gap_up:
-                found_breakout = True
-                continue
-            elif gap_direction_filter == "gap_down_only" and not is_gap_down:
-                found_breakout = True
-                continue
-            # "with_trade" is handled after we determine trade direction
-
-        # Prior days trend filter
-        if prior_days_filter_enabled:
-            bullish_count = prior_days_bullish_count[date_idx]
-            bearish_count = prior_days_lookback - bullish_count
-
-            # Majority determines trend
-            is_prior_bullish = bullish_count > bearish_count
-            is_prior_bearish = bearish_count > bullish_count
-
-            if prior_days_trend == "bullish" and not is_prior_bullish:
-                found_breakout = True
-                continue
-            elif prior_days_trend == "bearish" and not is_prior_bearish:
-                found_breakout = True
-                continue
-            # "with_trade" is handled after we determine trade direction
-
-        # Daily range filter
-        if daily_range_filter_enabled:
-            day_avg_range = avg_daily_range[date_idx]
-            if day_avg_range < min_avg_daily_range or day_avg_range > max_avg_daily_range:
-                found_breakout = True
-                continue
-
         # Get primary IB levels
         ib_high = ib_highs[date_idx]
         ib_low = ib_lows[date_idx]
@@ -586,29 +554,79 @@ def _mmap_backtest_worker(
                 long_break = False
 
         if long_break or short_break:
-            # Apply "with_trade" filters - gap and trend must align with direction
+            # Apply statistical filters
             skip_trade = False
+            day_gap = gap_percent[date_idx]
+            day_range = avg_daily_range[date_idx]
+            trade_dir = 'long' if long_break else 'short'
 
-            # Gap "with_trade" filter: gap up = long OK, gap down = short OK
-            if gap_filter_enabled and gap_direction_filter == "with_trade":
-                day_gap = gap_percent[date_idx]
-                is_gap_up = day_gap > 0
-                is_gap_down = day_gap < 0
-                if long_break and is_gap_down:
-                    skip_trade = True  # Don't go long on a gap down day
-                elif short_break and is_gap_up:
-                    skip_trade = True  # Don't go short on a gap up day
+            # =====================================================================
+            # GAP FILTER (statistical)
+            # =====================================================================
+            if gap_filter_mode != 'any' and not skip_trade:
+                if gap_filter_mode == 'middle_68':
+                    # Only trade gaps within middle 68% (normal days)
+                    if not (gap_p16 <= day_gap <= gap_p84):
+                        skip_trade = True
+                elif gap_filter_mode == 'exclude_middle_68':
+                    # Only trade extreme gap days
+                    if gap_p16 <= day_gap <= gap_p84:
+                        skip_trade = True
+                elif gap_filter_mode == 'directional':
+                    # Gap up = longs only, Gap down = shorts only
+                    if day_gap > 0 and trade_dir == 'short':
+                        skip_trade = True
+                    elif day_gap < 0 and trade_dir == 'long':
+                        skip_trade = True
+                elif gap_filter_mode == 'reverse_directional':
+                    # Gap up = shorts only (fade), Gap down = longs only
+                    if day_gap > 0 and trade_dir == 'long':
+                        skip_trade = True
+                    elif day_gap < 0 and trade_dir == 'short':
+                        skip_trade = True
 
-            # Prior days trend "with_trade" filter: bullish = long OK, bearish = short OK
-            if prior_days_filter_enabled and prior_days_trend == "with_trade" and not skip_trade:
+            # =====================================================================
+            # TREND FILTER
+            # =====================================================================
+            if trend_filter_mode != 'any' and not skip_trade:
                 bullish_count = prior_days_bullish_count[date_idx]
                 bearish_count = prior_days_lookback - bullish_count
-                is_prior_bullish = bullish_count > bearish_count
-                is_prior_bearish = bearish_count > bullish_count
-                if long_break and is_prior_bearish:
-                    skip_trade = True  # Don't go long after bearish days
-                elif short_break and is_prior_bullish:
-                    skip_trade = True  # Don't go short after bullish days
+                is_bullish_trend = bullish_count > bearish_count
+                is_bearish_trend = bearish_count > bullish_count
+
+                if trend_filter_mode == 'with_trend':
+                    # Trade with the trend
+                    if is_bullish_trend and trade_dir == 'short':
+                        skip_trade = True
+                    elif is_bearish_trend and trade_dir == 'long':
+                        skip_trade = True
+                elif trend_filter_mode == 'counter_trend':
+                    # Trade against the trend (mean reversion)
+                    if is_bullish_trend and trade_dir == 'long':
+                        skip_trade = True
+                    elif is_bearish_trend and trade_dir == 'short':
+                        skip_trade = True
+
+            # =====================================================================
+            # RANGE (VOLATILITY) FILTER (statistical)
+            # =====================================================================
+            if range_filter_mode != 'any' and not skip_trade:
+                if range_filter_mode == 'middle_68':
+                    # Only trade normal volatility days
+                    if not (range_p16 <= day_range <= range_p84):
+                        skip_trade = True
+                elif range_filter_mode == 'above_68':
+                    # Only trade high volatility days
+                    if day_range <= range_p68:
+                        skip_trade = True
+                elif range_filter_mode == 'below_median':
+                    # Only trade low volatility days
+                    if day_range >= range_p50:
+                        skip_trade = True
+                elif range_filter_mode == 'middle_68_or_below':
+                    # Trade if normal OR below normal volatility
+                    if day_range > range_p84:
+                        skip_trade = True
 
             if skip_trade:
                 found_breakout = True  # Skip this day but mark as processed
@@ -1035,6 +1053,35 @@ class MMapGridSearchOptimizer:
 
         start_time = time.time()
 
+        # Load distribution stats for statistical filters (cached per ticker)
+        dist_stats_dict = None
+        try:
+            stats_calc = DistributionStatsCalculator(str(self.data_dir))
+            ticker_stats = stats_calc.get_stats(self.ticker)
+            if ticker_stats:
+                # Convert to simple dict for passing to workers
+                dist_stats_dict = {
+                    'gap_p16': ticker_stats.gap_stats.p16,
+                    'gap_p84': ticker_stats.gap_stats.p84,
+                    'gap_mean': ticker_stats.gap_stats.mean,
+                    'gap_std': ticker_stats.gap_stats.std,
+                    'range_p16': ticker_stats.range_stats.p16,
+                    'range_p50': ticker_stats.range_stats.p50,
+                    'range_p68': ticker_stats.range_stats.p68,
+                    'range_p84': ticker_stats.range_stats.p84,
+                    'range_p90': ticker_stats.range_stats.p90,
+                    'range_mean': ticker_stats.range_stats.mean,
+                    'range_std': ticker_stats.range_stats.std,
+                }
+                print(f"Loaded distribution stats for {self.ticker}:")
+                print(f"  Gap: mean={ticker_stats.gap_stats.mean:.2f}%, "
+                      f"p16={ticker_stats.gap_stats.p16:.2f}%, p84={ticker_stats.gap_stats.p84:.2f}%")
+                print(f"  Range: mean={ticker_stats.range_stats.mean:.2f}%, "
+                      f"p50={ticker_stats.range_stats.p50:.2f}%, p84={ticker_stats.range_stats.p84:.2f}%")
+        except Exception as e:
+            print(f"Warning: Could not load distribution stats: {e}")
+            print("Statistical filters will use default thresholds")
+
         # Create memory-mapped arrays
         print("Creating memory-mapped arrays...")
         self.mmap_manager = MMapDataManager(
@@ -1071,7 +1118,8 @@ class MMapGridSearchOptimizer:
                         mmap_paths_dict=paths_dict,
                         ticker=self.ticker,
                         objective=objective,
-                        min_trades=min_trades
+                        min_trades=min_trades,
+                        dist_stats=dist_stats_dict
                     )
                     for params in batch
                 )

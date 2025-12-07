@@ -101,17 +101,17 @@ class OptimizationWorker(QThread):
 
             self.status_update.emit("Running two-phase optimization (Phase 1: Grid Search)...")
 
-            # Extract filter settings for the optimizer
+            # Extract statistical filter settings for the optimizer (mode-based)
             filter_overrides = {}
-            if self.settings.get('gap_filter_enabled'):
-                filter_overrides['gap_filter_enabled'] = True
-                filter_overrides['gap_direction_filter'] = self.settings.get('gap_direction_filter', 'any')
-            if self.settings.get('prior_days_filter_enabled'):
-                filter_overrides['prior_days_filter_enabled'] = True
-                filter_overrides['prior_days_trend'] = self.settings.get('prior_days_trend', 'any')
-            if self.settings.get('daily_range_filter_enabled'):
-                filter_overrides['daily_range_filter_enabled'] = True
-                filter_overrides['min_avg_daily_range_percent'] = self.settings.get('min_avg_daily_range_percent', 0.0)
+            gap_mode = self.settings.get('gap_filter_mode', 'any')
+            if gap_mode != 'any':
+                filter_overrides['gap_filter_mode'] = gap_mode
+            trend_mode = self.settings.get('trend_filter_mode', 'any')
+            if trend_mode != 'any':
+                filter_overrides['trend_filter_mode'] = trend_mode
+            range_mode = self.settings.get('range_filter_mode', 'any')
+            if range_mode != 'any':
+                filter_overrides['range_filter_mode'] = range_mode
 
             # For two-phase, use the selected preset for Phase 1
             # Valid presets: quick, standard, full, thorough
@@ -322,6 +322,7 @@ class OptimizationWorker(QThread):
             best_metrics = {}
 
         final_results = {
+            'ticker': ticker,  # Include ticker for ML tab
             'total_combinations': results.total_combinations,
             'completed': results.completed_combinations,
             'total_time': results.total_time_seconds,
@@ -583,6 +584,7 @@ class OptimizationWorker(QThread):
         best_metrics = get_metrics(results.best_result) if results.best_result else {}
 
         return {
+            'ticker': self.settings['ticker'],  # Include ticker for ML tab
             'total_combinations': results.phase1_combinations + results.phase2_trials,
             'completed': results.phase1_combinations + results.phase2_trials,
             'total_time': results.total_time_seconds,
