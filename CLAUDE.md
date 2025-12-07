@@ -57,7 +57,7 @@ This file provides context and guidance for Claude Code when working with this p
 
 **Desktop App (PySide6) - Primary**
 - Native desktop application with professional dark theme
-- 9 tabs: Optimization, Portfolio, Equity Curve, Trade Browser, IB Analysis, Monitoring, ML Filter, Saved Tests, Download
+- 10 tabs: Optimization, Portfolio, Forward Tests, Equity Curve, Trade Browser, IB Analysis, Monitoring, ML Filter, Saved Tests, Download
 - QThread workers for non-blocking background processing
 - Live progress updates with elapsed time and ETA
 - Two-phase optimization (Grid + Bayesian) with presets (quick, standard, full, thorough)
@@ -83,6 +83,14 @@ This file provides context and guidance for Claude Code when working with this p
   - Per-ticker breakdown table with contribution percentages
   - Individual ticker curves overlaid on combined chart
   - **Monthly P&L bar chart** showing gain/loss per month with win/loss month stats
+- **Forward Tests tab** for live market validation of saved optimizations
+  - Start forward tests from saved optimization results
+  - Run periodic forward tests as new market data is loaded
+  - Tracks cumulative forward P&L vs backtest P&L
+  - Run history with per-period breakdown (dates, trades, P&L, win%)
+  - Cumulative P&L chart and per-run bar chart
+  - Consistency metric (% profitable forward test runs)
+  - Results persisted to `output/forward_tests/forward_tests.json`
 - **Statistical filter dropdowns** in Optimization tab for gap, trend, and range filters
 - **Rebuild Stats button** in Download tab to recompute distribution stats after new data
 
@@ -255,6 +263,7 @@ C:\Users\Warren\Projects\ib_breakout_optimizer\
 │   │   ├── monitoring_tab.py  # Phase 5 monitoring dashboard
 │   │   ├── ml_filter_tab.py   # Phase 6 ML filter training
 │   │   ├── saved_tests_tab.py # Saved test results storage
+│   │   ├── forward_tests_tab.py # Forward testing with live data
 │   │   └── download_tab.py    # Polygon.io data download + rebuild stats
 │   ├── workers/
 │   │   ├── backtest_worker.py # Background backtest thread
