@@ -41,32 +41,28 @@ class OptimizationTab(QWidget):
     def _setup_ui(self):
         """Create the UI layout."""
         layout = QVBoxLayout(self)
-        layout.setSpacing(12)
+        layout.setSpacing(8)
+        layout.setContentsMargins(8, 8, 8, 8)
 
-        # Settings section
-        settings_layout = QHBoxLayout()
+        # Single combined settings group - all on one row
+        settings_group = QGroupBox("Optimization Settings")
+        settings_grid = QGridLayout(settings_group)
+        settings_grid.setSpacing(6)
+        settings_grid.setContentsMargins(8, 8, 8, 8)
 
-        # Data settings
-        data_group = QGroupBox("Data Settings")
-        data_layout = QGridLayout(data_group)
-        data_layout.setSpacing(8)
-
-        data_layout.addWidget(QLabel("Ticker:"), 0, 0)
+        # Row 0: Ticker, Objective, Preset, Run button
+        settings_grid.addWidget(QLabel("Ticker:"), 0, 0)
         self.ticker_combo = QComboBox()
         self.ticker_combo.addItems(["TSLA", "QQQ", "AAPL", "NVDA", "MSFT", "SPY", "AMD", "AMZN", "GOOGL", "META"])
+        self.ticker_combo.setMinimumWidth(70)
         self.ticker_combo.currentTextChanged.connect(self._update_date_range)
-        data_layout.addWidget(self.ticker_combo, 0, 1)
+        settings_grid.addWidget(self.ticker_combo, 0, 1)
 
-        # Date range label
         self.date_range_label = QLabel("")
-        self.date_range_label.setStyleSheet("color: #888888; font-size: 11px;")
-        data_layout.addWidget(self.date_range_label, 0, 2)
+        self.date_range_label.setStyleSheet("color: #888888; font-size: 10px;")
+        settings_grid.addWidget(self.date_range_label, 0, 2)
 
-        self.qqq_filter_check = QCheckBox("Include QQQ Filter")
-        self.qqq_filter_check.setChecked(True)
-        data_layout.addWidget(self.qqq_filter_check, 1, 0, 1, 3)
-
-        data_layout.addWidget(QLabel("Objective:"), 2, 0)
+        settings_grid.addWidget(QLabel("Objective:"), 0, 3)
         self.objective_combo = QComboBox()
         self.objective_combo.addItems([
             "profit_factor", "sharpe_ratio", "sortino_ratio",
@@ -81,106 +77,93 @@ class OptimizationTab(QWidget):
             "win_rate: Percentage of winning trades\n"
             "k_ratio: Smooth equity curve (consistency)"
         )
-        data_layout.addWidget(self.objective_combo, 2, 1)
+        settings_grid.addWidget(self.objective_combo, 0, 4)
 
-        # Add objective description label
+        # Hidden description label (for compatibility)
         self.objective_desc = QLabel("")
-        self.objective_desc.setStyleSheet("color: #888888; font-size: 11px;")
-        data_layout.addWidget(self.objective_desc, 2, 2)
         self.objective_combo.currentTextChanged.connect(self._update_objective_desc)
         self._update_objective_desc(self.objective_combo.currentText())
 
-        # Connect change signals for saving
-        self.ticker_combo.currentTextChanged.connect(self._save_settings)
-        self.qqq_filter_check.stateChanged.connect(self._save_settings)
-        self.objective_combo.currentTextChanged.connect(self._save_settings)
-
-        settings_layout.addWidget(data_group)
-
-        # Optimization settings
-        opt_group = QGroupBox("Optimization Settings")
-        opt_layout = QGridLayout(opt_group)
-        opt_layout.setSpacing(8)
-
-        opt_layout.addWidget(QLabel("Preset:"), 0, 0)
+        settings_grid.addWidget(QLabel("Preset:"), 0, 5)
         self.preset_combo = QComboBox()
         self.preset_combo.addItems(["quick (96)", "standard (288)", "full (1,152)", "thorough (2,592)"])
-        self.preset_combo.setCurrentText("standard (288)")  # Default to standard
-        opt_layout.addWidget(self.preset_combo, 0, 1)
-
-        # Preset info
-        self.preset_info = QLabel("All parameters with coarse grid, ~200 combinations (5x faster than full)")
-        self.preset_info.setStyleSheet("color: #888888; font-style: italic;")
-        opt_layout.addWidget(self.preset_info, 1, 0, 1, 2)
+        self.preset_combo.setCurrentText("standard (288)")
         self.preset_combo.currentTextChanged.connect(self._update_preset_info)
+        settings_grid.addWidget(self.preset_combo, 0, 6)
 
-        # Connect change signals for saving
-        self.preset_combo.currentTextChanged.connect(self._save_settings)
+        # Hidden preset info (for compatibility)
+        self.preset_info = QLabel("")
 
-        settings_layout.addWidget(opt_group)
+        # Run and Cancel buttons inline
+        self.run_button = QPushButton("Run")
+        self.run_button.setObjectName("primary")
+        self.run_button.setMinimumHeight(28)
+        self.run_button.setMinimumWidth(60)
+        self.run_button.clicked.connect(self._run_optimization)
+        settings_grid.addWidget(self.run_button, 0, 7)
 
-        layout.addLayout(settings_layout)
+        self.cancel_button = QPushButton("Cancel")
+        self.cancel_button.setMinimumHeight(28)
+        self.cancel_button.setMinimumWidth(60)
+        self.cancel_button.setEnabled(False)
+        self.cancel_button.clicked.connect(self._cancel_optimization)
+        settings_grid.addWidget(self.cancel_button, 0, 8)
 
-        # Trade Filters section
-        filters_layout = QHBoxLayout()
+        # Row 1: Trade filters (all inline)
+        filters_label = QLabel("Filters:")
+        filters_label.setStyleSheet("color: #888888;")
+        settings_grid.addWidget(filters_label, 1, 0)
 
-        filters_group = QGroupBox("Trade Filters (optimize these parameters)")
-        filters_grid = QGridLayout(filters_group)
-        filters_grid.setSpacing(8)
-
-        # Gap filter
-        self.gap_filter_check = QCheckBox("Gap %")
+        self.gap_filter_check = QCheckBox("Gap")
         self.gap_filter_check.setToolTip("Filter trades by gap % (today's open vs yesterday's close)")
-        filters_grid.addWidget(self.gap_filter_check, 0, 0)
+        settings_grid.addWidget(self.gap_filter_check, 1, 1)
 
         self.gap_direction_combo = QComboBox()
         self.gap_direction_combo.addItems(["any", "gap_up_only", "gap_down_only", "with_trade"])
-        self.gap_direction_combo.setToolTip(
-            "any: Allow all gaps\n"
-            "gap_up_only: Only trade on gap up days\n"
-            "gap_down_only: Only trade on gap down days\n"
-            "with_trade: Gap must align with trade direction"
-        )
+        self.gap_direction_combo.setToolTip("Gap direction filter")
         self.gap_direction_combo.setEnabled(False)
-        filters_grid.addWidget(self.gap_direction_combo, 0, 1)
+        settings_grid.addWidget(self.gap_direction_combo, 1, 2)
         self.gap_filter_check.stateChanged.connect(
             lambda state: self.gap_direction_combo.setEnabled(state == Qt.Checked)
         )
 
-        # Prior days trend filter
-        self.prior_days_filter_check = QCheckBox("Prior Days Trend")
-        self.prior_days_filter_check.setToolTip("Filter trades by prior N days trend (close vs open)")
-        filters_grid.addWidget(self.prior_days_filter_check, 0, 2)
+        self.prior_days_filter_check = QCheckBox("Trend")
+        self.prior_days_filter_check.setToolTip("Filter trades by prior N days trend")
+        settings_grid.addWidget(self.prior_days_filter_check, 1, 3)
 
         self.prior_days_trend_combo = QComboBox()
         self.prior_days_trend_combo.addItems(["any", "bullish", "bearish", "with_trade"])
-        self.prior_days_trend_combo.setToolTip(
-            "any: Allow all trends\n"
-            "bullish: Prior days mostly bullish (close > open)\n"
-            "bearish: Prior days mostly bearish (close < open)\n"
-            "with_trade: Trend must align with trade direction"
-        )
+        self.prior_days_trend_combo.setToolTip("Prior days trend filter")
         self.prior_days_trend_combo.setEnabled(False)
-        filters_grid.addWidget(self.prior_days_trend_combo, 0, 3)
+        settings_grid.addWidget(self.prior_days_trend_combo, 1, 4)
         self.prior_days_filter_check.stateChanged.connect(
             lambda state: self.prior_days_trend_combo.setEnabled(state == Qt.Checked)
         )
 
-        # Daily range filter
-        self.daily_range_filter_check = QCheckBox("Daily Range %")
+        self.daily_range_filter_check = QCheckBox("Range")
         self.daily_range_filter_check.setToolTip("Filter trades by average daily range % (volatility)")
-        filters_grid.addWidget(self.daily_range_filter_check, 0, 4)
+        settings_grid.addWidget(self.daily_range_filter_check, 1, 5)
 
         self.min_daily_range_combo = QComboBox()
         self.min_daily_range_combo.addItems(["0.0", "0.5", "1.0", "1.5", "2.0", "2.5", "3.0"])
-        self.min_daily_range_combo.setToolTip("Minimum average daily range % required")
+        self.min_daily_range_combo.setToolTip("Minimum average daily range %")
         self.min_daily_range_combo.setEnabled(False)
-        filters_grid.addWidget(self.min_daily_range_combo, 0, 5)
+        settings_grid.addWidget(self.min_daily_range_combo, 1, 6)
         self.daily_range_filter_check.stateChanged.connect(
             lambda state: self.min_daily_range_combo.setEnabled(state == Qt.Checked)
         )
 
-        # Connect filter changes to save settings
+        # Progress bar in row 1, spanning remaining columns
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setMinimumHeight(22)
+        self.progress_bar.setTextVisible(True)
+        self.progress_bar.setFormat("%v / %m (%p%)")
+        settings_grid.addWidget(self.progress_bar, 1, 7, 1, 2)
+
+        # Connect change signals for saving
+        self.ticker_combo.currentTextChanged.connect(self._save_settings)
+        self.objective_combo.currentTextChanged.connect(self._save_settings)
+        self.preset_combo.currentTextChanged.connect(self._save_settings)
         self.gap_filter_check.stateChanged.connect(self._save_settings)
         self.gap_direction_combo.currentTextChanged.connect(self._save_settings)
         self.prior_days_filter_check.stateChanged.connect(self._save_settings)
@@ -188,65 +171,22 @@ class OptimizationTab(QWidget):
         self.daily_range_filter_check.stateChanged.connect(self._save_settings)
         self.min_daily_range_combo.currentTextChanged.connect(self._save_settings)
 
-        filters_layout.addWidget(filters_group)
-        layout.addLayout(filters_layout)
+        layout.addWidget(settings_group)
 
-        # Run button and progress section - compact layout
-        run_frame = QFrame()
-        run_frame.setStyleSheet("""
-            QFrame {
-                background-color: #252525;
-                border: 1px solid #333333;
-                border-radius: 6px;
-                padding: 8px;
-            }
-        """)
-        run_layout = QVBoxLayout(run_frame)
-        run_layout.setSpacing(6)
-        run_layout.setContentsMargins(8, 8, 8, 8)
+        # Status and metrics row - single compact line
+        metrics_row = QHBoxLayout()
+        metrics_row.setSpacing(6)
 
-        # Top row: Button + Progress bar + Status (all horizontal)
-        top_row = QHBoxLayout()
-        top_row.setSpacing(8)
-
-        self.run_button = QPushButton("Run Optimization")
-        self.run_button.setObjectName("primary")
-        self.run_button.setMinimumHeight(32)
-        self.run_button.setMinimumWidth(140)
-        self.run_button.clicked.connect(self._run_optimization)
-        top_row.addWidget(self.run_button)
-
-        self.cancel_button = QPushButton("Cancel")
-        self.cancel_button.setMinimumHeight(32)
-        self.cancel_button.setMinimumWidth(70)
-        self.cancel_button.setEnabled(False)
-        self.cancel_button.clicked.connect(self._cancel_optimization)
-        top_row.addWidget(self.cancel_button)
-
-        # Progress bar inline
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setMinimumHeight(24)
-        self.progress_bar.setMinimumWidth(200)
-        self.progress_bar.setTextVisible(True)
-        self.progress_bar.setFormat("%v / %m (%p%)")
-        top_row.addWidget(self.progress_bar, 1)  # stretch
-
-        # Status text inline
         self.status_label = QLabel("Ready")
         self.status_label.setStyleSheet("color: #888888;")
-        self.status_label.setMinimumWidth(200)
-        top_row.addWidget(self.status_label)
+        self.status_label.setMinimumWidth(180)
+        metrics_row.addWidget(self.status_label)
 
-        run_layout.addLayout(top_row)
-
-        # Metrics row - compact inline cards
-        metrics_row = QHBoxLayout()
-        metrics_row.setSpacing(4)
-
+        # Compact inline cards
         self.completed_card = MetricCard("Done", compact=True)
         metrics_row.addWidget(self.completed_card)
 
-        self.best_objective_card = MetricCard("Best Obj", compact=True)
+        self.best_objective_card = MetricCard("Best", compact=True)
         metrics_row.addWidget(self.best_objective_card)
 
         self.best_trades_card = MetricCard("Trades", compact=True)
@@ -258,12 +198,10 @@ class OptimizationTab(QWidget):
         self.speed_card = MetricCard("Speed", compact=True)
         metrics_row.addWidget(self.speed_card)
 
-        # Separator
         sep = QLabel("|")
-        sep.setStyleSheet("color: #555555;")
+        sep.setStyleSheet("color: #444444;")
         metrics_row.addWidget(sep)
 
-        # Delta cards (comparison to previous run)
         self.delta_pnl_card = MetricCard("ΔP&L", compact=True)
         metrics_row.addWidget(self.delta_pnl_card)
 
@@ -274,9 +212,7 @@ class OptimizationTab(QWidget):
         metrics_row.addWidget(self.delta_pf_card)
 
         metrics_row.addStretch()
-        run_layout.addLayout(metrics_row)
-
-        layout.addWidget(run_frame)
+        layout.addLayout(metrics_row)
 
         # Results section - horizontal split for better space usage
         main_splitter = QSplitter(Qt.Horizontal)
@@ -352,10 +288,10 @@ class OptimizationTab(QWidget):
         chart_layout.addWidget(self.equity_chart)
 
         right_splitter.addWidget(chart_frame)
-        right_splitter.setSizes([210, 190])  # More space for equity curve
+        right_splitter.setSizes([180, 280])  # More space for equity curve
 
         main_splitter.addWidget(right_splitter)
-        main_splitter.setSizes([220, 680])  # Narrow left, wide right
+        main_splitter.setSizes([200, 700])  # Narrow left, wide right
 
         layout.addWidget(main_splitter, 1)  # Give splitter stretch priority
 
@@ -485,7 +421,7 @@ class OptimizationTab(QWidget):
 
         settings = {
             'ticker': self.ticker_combo.currentText(),
-            'use_qqq_filter': self.qqq_filter_check.isChecked(),
+            'use_qqq_filter': True,  # Always enabled
             'objective': self.objective_combo.currentText(),
             'preset': preset_name,
             'mode': 'two_phase',  # Always use two-phase (Grid + Bayesian)
@@ -820,7 +756,6 @@ class OptimizationTab(QWidget):
     def _save_settings(self):
         """Save current settings to QSettings."""
         self.settings.setValue("opt/ticker", self.ticker_combo.currentText())
-        self.settings.setValue("opt/qqq_filter", self.qqq_filter_check.isChecked())
         self.settings.setValue("opt/objective", self.objective_combo.currentText())
         # Save just the preset name (e.g., "standard" not "standard (288)")
         preset_name = self.preset_combo.currentText().split(" ")[0]
@@ -841,10 +776,6 @@ class OptimizationTab(QWidget):
         idx = self.ticker_combo.findText(ticker)
         if idx >= 0:
             self.ticker_combo.setCurrentIndex(idx)
-
-        # QQQ filter
-        qqq_filter = self.settings.value("opt/qqq_filter", True, type=bool)
-        self.qqq_filter_check.setChecked(qqq_filter)
 
         # Objective (default to profit_factor)
         objective = self.settings.value("opt/objective", "profit_factor")
@@ -967,10 +898,9 @@ class OptimizationTab(QWidget):
         result = self.top_results_data[row].copy()  # Copy to avoid modifying original
         ticker = self.ticker_combo.currentText()
 
-        # Add QQQ filter setting from the checkbox (may not be in result params)
-        # This ensures the backtest uses the same filter setting as the optimization
+        # QQQ filter is always enabled (unless ticker is QQQ itself)
         if 'use_qqq_filter' not in result:
-            result['use_qqq_filter'] = self.qqq_filter_check.isChecked() and ticker != 'QQQ'
+            result['use_qqq_filter'] = ticker != 'QQQ'
 
         # Emit signal with params and ticker for main window to handle
         self.result_double_clicked.emit(result, ticker)

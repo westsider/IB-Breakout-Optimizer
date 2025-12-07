@@ -8,7 +8,7 @@ This file provides context and guidance for Claude Code when working with this p
 
 **Purpose**: Custom Python backtester with continuous learning/self-optimization for the IB (Initial Balance) Breakout trading strategy. Optimized parameters are exported to NinjaTrader for live trading.
 
-**Status**: Phase 5 complete with continuous learning/monitoring system. Ready for Phase 6 (ML Filter) or Phase 7 (Portfolio View).
+**Status**: Phase 6 in progress - ML Filter module complete with training UI. Ready for ML integration into optimizer.
 
 ---
 
@@ -52,7 +52,7 @@ This file provides context and guidance for Claude Code when working with this p
 
 **Desktop App (PySide6) - Primary**
 - Native desktop application with professional dark theme
-- 6 tabs: Optimization, Equity Curve, Trade Browser, IB Analysis, Monitoring, Download
+- 7 tabs: Optimization, Equity Curve, Trade Browser, IB Analysis, Monitoring, ML Filter, Download
 - QThread workers for non-blocking background processing
 - Live progress updates with elapsed time and ETA
 - Two-phase optimization (Grid + Bayesian) with presets (quick, standard, full, thorough)
@@ -107,12 +107,37 @@ This file provides context and guidance for Claude Code when working with this p
 - Active alerts table with acknowledge function
 - Data update status and controls
 
-### Pending Phases
+#### Phase 6: ML Filter (In Progress)
 
-#### Phase 6: ML Filter (Not Started)
-- Feature builder (IB size, time-of-day, volume, QQQ confirm)
-- Train win/loss classifier (LightGBM/XGBoost)
-- Integrate as trade filter with probability threshold
+**ML Filter Module** (`ml_filter/`)
+- `feature_builder.py` - Extract ML features from backtest trades
+  - IB characteristics (range %, duration)
+  - Gap % (today's open vs yesterday's close)
+  - Prior days trend (bullish/bearish count)
+  - Daily range/volatility
+  - Time features (hour, day of week)
+  - Trade direction (long/short)
+  - QQQ confirmation status
+  - Distance from IB at entry
+- `model_trainer.py` - LightGBM classifier for win/loss prediction
+  - Cross-validation training (5-fold)
+  - Model metrics: accuracy, precision, recall, F1, ROC AUC
+  - Feature importance analysis
+  - Model persistence (save/load pickle files)
+
+**ML Filter Tab** in Desktop App
+- Ticker and parameter selection
+- One-click training (runs backtest → extracts features → trains model)
+- Model performance metrics display
+- Feature importance bar chart
+- Save/load trained models
+
+**Pending ML Integration**
+- Integrate ML filter into mmap optimizer
+- Add ML filter controls to Optimization tab
+- Probability threshold filtering
+
+### Pending Phases
 
 #### Phase 7: Portfolio View Tab (Not Started)
 - New "Portfolio" tab in desktop app
@@ -177,6 +202,11 @@ C:\Users\Warren\Projects\ib_breakout_optimizer\
 │   ├── reoptimization_trigger.py # Re-opt triggers
 │   └── data_updater.py        # Polygon.io data updates
 │
+├── ml_filter/                 # Phase 6: ML Trade Filter
+│   ├── __init__.py            # Module exports
+│   ├── feature_builder.py     # Extract features from trades
+│   └── model_trainer.py       # LightGBM classifier training
+│
 ├── desktop_ui/                # PySide6 Desktop App (Primary)
 │   ├── main.py                # App entry point
 │   ├── main_window.py         # Main window with tabs
@@ -186,6 +216,7 @@ C:\Users\Warren\Projects\ib_breakout_optimizer\
 │   │   ├── trade_browser_tab.py # Trade list with charts
 │   │   ├── ib_analysis_tab.py # IB size/day analysis
 │   │   ├── monitoring_tab.py  # Phase 5 monitoring dashboard
+│   │   ├── ml_filter_tab.py   # Phase 6 ML filter training
 │   │   └── download_tab.py    # Polygon.io data download
 │   ├── workers/
 │   │   ├── backtest_worker.py # Background backtest thread
@@ -393,11 +424,13 @@ pyyaml>=6.0
 requests>=2.31
 PySide6>=6.5
 joblib>=1.3
+lightgbm>=4.0
+scikit-learn>=1.3
 ```
 
 Install with:
 ```bash
-pip install pandas numpy optuna plotly streamlit pyarrow pyyaml requests PySide6 joblib
+pip install pandas numpy optuna plotly streamlit pyarrow pyyaml requests PySide6 joblib lightgbm scikit-learn
 ```
 
 ---
