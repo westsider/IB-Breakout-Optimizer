@@ -16,6 +16,7 @@ from PySide6.QtGui import QColor
 
 import pyqtgraph as pg
 import numpy as np
+import pandas as pd
 
 
 class CandlestickItem(pg.GraphicsObject):
@@ -72,12 +73,14 @@ class TradeBrowserTab(QWidget):
         self.trades = []
         self.data_dir = data_dir
         self.bar_cache = {}  # Cache loaded bar data by ticker
+        self.filter_data = {}  # Cache filter data by date (gap %, trend, range)
         self._setup_ui()
 
     def set_data_dir(self, path: str):
         """Update data directory."""
         self.data_dir = path
         self.bar_cache = {}  # Clear cache when data dir changes
+        self.filter_data = {}  # Clear filter cache too
 
     def _setup_ui(self):
         """Create the UI layout."""
@@ -146,10 +149,11 @@ class TradeBrowserTab(QWidget):
         table_layout.addWidget(self.trade_count_label)
 
         self.trade_table = QTableWidget()
-        self.trade_table.setColumnCount(10)
+        self.trade_table.setColumnCount(13)
         self.trade_table.setHorizontalHeaderLabels([
             "Entry Time", "Exit Time", "Direction", "Entry", "Exit",
-            "P&L", "P&L %", "Move Capture", "Exit Reason", "Bars"
+            "P&L", "P&L %", "Move Capture", "Exit Reason", "Bars",
+            "Gap %", "Trend", "Avg Range"
         ])
         self.trade_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.trade_table.setAlternatingRowColors(True)
@@ -181,7 +185,7 @@ class TradeBrowserTab(QWidget):
 
         layout.addWidget(splitter)
 
-    def load_trades(self, trades: list):
+    def load_trades(self, trades: list, ticker: str = None):
         """Load trades into the browser."""
         self.trades = trades
 
@@ -191,6 +195,13 @@ class TradeBrowserTab(QWidget):
             max_date = max(t.entry_time.date() for t in trades if t.entry_time)
             self.date_from.setDate(QDate(min_date.year, min_date.month, min_date.day))
             self.date_to.setDate(QDate(max_date.year, max_date.month, max_date.day))
+
+            # Calculate filter data for the ticker
+            # Try to get ticker from first trade if not provided
+            if ticker is None and trades:
+                ticker = getattr(trades[0], 'ticker', None)
+            if ticker:
+                self._calculate_filter_data(ticker)
 
         self._apply_filters()
 
@@ -307,6 +318,119 @@ class TradeBrowserTab(QWidget):
 
             # Bars held
             self.trade_table.setItem(row, 9, QTableWidgetItem(str(trade.bars_held)))
+
+            # Filter columns: Gap %, Trend, Avg Range
+            trade_date = trade.entry_time.date() if trade.entry_time else None
+            if trade_date and trade_date in self.filter_data:
+                fd = self.filter_data[trade_date]
+
+                # Gap %
+                gap_pct = fd.get('gap_pct')
+                if gap_pct is not None:
+                    gap_item = QTableWidgetItem(f"{gap_pct:+.2f}%")
+                    gap_item.setForeground(
+                        QColor("#00ff00") if gap_pct > 0 else QColor("#ff4444") if gap_pct < 0 else QColor("#ffffff")
+                    )
+                    self.trade_table.setItem(row, 10, gap_item)
+                else:
+                    self.trade_table.setItem(row, 10, QTableWidgetItem("N/A"))
+
+                # Trend (bullish count / lookback)
+                bullish_count = fd.get('bullish_count')
+                trend_lookback = fd.get('trend_lookback', 3)
+                if bullish_count is not None:
+                    trend_str = f"{int(bullish_count)}/{trend_lookback}"
+                    trend_item = QTableWidgetItem(trend_str)
+                    # Color: green if bullish majority, red if bearish majority
+                    if bullish_count > trend_lookback / 2:
+                        trend_item.setForeground(QColor("#00ff00"))
+                    elif bullish_count < trend_lookback / 2:
+                        trend_item.setForeground(QColor("#ff4444"))
+                    else:
+                        trend_item.setForeground(QColor("#ffaa00"))  # Neutral
+                    self.trade_table.setItem(row, 11, trend_item)
+                else:
+                    self.trade_table.setItem(row, 11, QTableWidgetItem("N/A"))
+
+                # Avg Range %
+                avg_range = fd.get('avg_range_pct')
+                if avg_range is not None:
+                    range_item = QTableWidgetItem(f"{avg_range:.2f}%")
+                    self.trade_table.setItem(row, 12, range_item)
+                else:
+                    self.trade_table.setItem(row, 12, QTableWidgetItem("N/A"))
+            else:
+                # No filter data available
+                self.trade_table.setItem(row, 10, QTableWidgetItem("N/A"))
+                self.trade_table.setItem(row, 11, QTableWidgetItem("N/A"))
+                self.trade_table.setItem(row, 12, QTableWidgetItem("N/A"))
+
+    def _calculate_filter_data(self, ticker: str, trend_lookback: int = 3, range_lookback: int = 5):
+        """
+        Calculate filter values (gap %, trend, range) for each trading day.
+
+        This matches the logic in mmap_grid_search.py for filter calculation.
+        """
+        if not self.data_dir:
+            return
+
+        try:
+            # Find data file
+            data_path = Path(self.data_dir)
+            data_file = None
+
+            for f in data_path.iterdir():
+                if f.is_file() and ticker.upper() in f.name.upper():
+                    if f.suffix.lower() in ['.txt', '.csv']:
+                        data_file = f
+                        if '_NT' in f.name.upper():
+                            break  # Prefer NT format
+
+            if not data_file:
+                return
+
+            # Load NinjaTrader format data
+            df = pd.read_csv(data_file, sep=';', header=None,
+                names=['datetime', 'open', 'high', 'low', 'close', 'volume', 'oi'])
+
+            # Parse date
+            df['date'] = pd.to_datetime(df['datetime'].astype(str).str[:8], format='%Y%m%d')
+
+            # Aggregate to daily OHLC
+            daily = df.groupby('date').agg({
+                'open': 'first',
+                'high': 'max',
+                'low': 'min',
+                'close': 'last'
+            }).reset_index()
+
+            # Calculate Gap % (today's open - yesterday's close) / yesterday's close * 100
+            daily['prior_close'] = daily['close'].shift(1)
+            daily['gap_pct'] = (daily['open'] - daily['prior_close']) / daily['prior_close'] * 100
+
+            # Calculate Prior Days Trend (bullish count over lookback)
+            daily['bullish'] = (daily['close'] > daily['open']).astype(int)
+            daily['bullish_count'] = daily['bullish'].shift(1).rolling(trend_lookback).sum()
+
+            # Calculate Avg Daily Range % (rolling average of (high-low)/low * 100)
+            daily['range_pct'] = (daily['high'] - daily['low']) / daily['low'] * 100
+            daily['avg_range_pct'] = daily['range_pct'].shift(1).rolling(range_lookback).mean()
+
+            # Store in filter_data dict keyed by date
+            self.filter_data = {}
+            for _, row in daily.iterrows():
+                date_key = row['date'].date()
+                self.filter_data[date_key] = {
+                    'gap_pct': row['gap_pct'] if pd.notna(row['gap_pct']) else None,
+                    'bullish_count': row['bullish_count'] if pd.notna(row['bullish_count']) else None,
+                    'trend_lookback': trend_lookback,
+                    'avg_range_pct': row['avg_range_pct'] if pd.notna(row['avg_range_pct']) else None,
+                    'range_lookback': range_lookback
+                }
+
+        except Exception as e:
+            print(f"Error calculating filter data: {e}")
+            self.filter_data = {}
 
     def _reset_filters(self):
         """Reset all filters to default."""

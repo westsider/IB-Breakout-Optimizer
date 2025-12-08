@@ -9,9 +9,9 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QComboBox, QLineEdit, QPushButton, QGroupBox,
     QTableWidget, QTableWidgetItem, QHeaderView, QFrame,
-    QMessageBox
+    QMessageBox, QDateEdit
 )
-from PySide6.QtCore import Qt, QThread, Signal, QSettings
+from PySide6.QtCore import Qt, QThread, Signal, QSettings, QDate
 
 
 class DownloadWorker(QThread):
@@ -258,6 +258,58 @@ class DownloadTab(QWidget):
 
         layout.addWidget(settings_group)
 
+        # Custom Date Range section (for prepending historical data)
+        date_group = QGroupBox("Custom Date Range (Prepend Historical Data)")
+        date_layout = QGridLayout(date_group)
+        date_layout.setSpacing(8)
+
+        # Start date
+        date_layout.addWidget(QLabel("Start Date:"), 0, 0)
+        self.start_date_edit = QDateEdit()
+        self.start_date_edit.setCalendarPopup(True)
+        self.start_date_edit.setDisplayFormat("yyyy-MM-dd")
+        # Default to 1 year before today
+        self.start_date_edit.setDate(QDate.currentDate().addYears(-2))
+        date_layout.addWidget(self.start_date_edit, 0, 1)
+
+        # End date
+        date_layout.addWidget(QLabel("End Date:"), 0, 2)
+        self.end_date_edit = QDateEdit()
+        self.end_date_edit.setCalendarPopup(True)
+        self.end_date_edit.setDisplayFormat("yyyy-MM-dd")
+        # Default to 1 year before today (to prepend before existing data)
+        self.end_date_edit.setDate(QDate.currentDate().addYears(-1))
+        date_layout.addWidget(self.end_date_edit, 0, 3)
+
+        # Auto-detect button
+        self.auto_detect_btn = QPushButton("Auto-Detect Gap")
+        self.auto_detect_btn.setToolTip(
+            "Auto-fill dates to download 1 year prior to existing data"
+        )
+        self.auto_detect_btn.clicked.connect(self._auto_detect_dates)
+        date_layout.addWidget(self.auto_detect_btn, 0, 4)
+
+        # Prepend button
+        self.prepend_btn = QPushButton("Download && Merge")
+        self.prepend_btn.setObjectName("primary")
+        self.prepend_btn.setMinimumHeight(36)
+        self.prepend_btn.setToolTip(
+            "Download the date range and merge with existing data"
+        )
+        self.prepend_btn.clicked.connect(self._start_prepend)
+        date_layout.addWidget(self.prepend_btn, 1, 0, 1, 2)
+
+        # Help text
+        prepend_help = QLabel(
+            "Use this to add historical data before your existing data. "
+            "Click 'Auto-Detect Gap' to auto-fill dates for 1 year prior."
+        )
+        prepend_help.setStyleSheet("color: #888888; font-size: 10px;")
+        prepend_help.setWordWrap(True)
+        date_layout.addWidget(prepend_help, 1, 2, 1, 3)
+
+        layout.addWidget(date_group)
+
         # Action buttons
         button_frame = QFrame()
         button_layout = QHBoxLayout(button_frame)
@@ -324,10 +376,21 @@ class DownloadTab(QWidget):
         progress_layout = QVBoxLayout(progress_frame)
         progress_layout.setContentsMargins(12, 8, 12, 8)
 
-        self.progress_label = QLabel("Ready to download")
+        # Status header (large, prominent)
+        self.status_label = QLabel("Ready")
+        self.status_label.setStyleSheet("color: #888888; font-size: 16px; font-weight: bold;")
+        progress_layout.addWidget(self.status_label)
+
+        # Progress details
+        self.progress_label = QLabel("Select a ticker and click Download to begin")
         self.progress_label.setStyleSheet("color: #888888;")
         self.progress_label.setWordWrap(True)
         progress_layout.addWidget(self.progress_label)
+
+        # ETA label (prominent when downloading)
+        self.eta_label = QLabel("")
+        self.eta_label.setStyleSheet("color: #ffaa00; font-size: 14px; font-weight: bold;")
+        progress_layout.addWidget(self.eta_label)
 
         layout.addWidget(progress_frame)
 
@@ -530,8 +593,17 @@ class DownloadTab(QWidget):
         """Start the download worker thread."""
         self.download_btn.setEnabled(False)
         self.update_btn.setEnabled(False)
+        self.prepend_btn.setEnabled(False)
+        self.auto_detect_btn.setEnabled(False)
         self.cancel_btn.setEnabled(True)
-        self.progress_label.setStyleSheet("color: #2a82da;")
+
+        # Update status display
+        days_to_download = (end_date - start_date).days
+        self.status_label.setText(f"⏳ DOWNLOADING {ticker}...")
+        self.status_label.setStyleSheet("color: #2a82da; font-size: 16px; font-weight: bold;")
+        self.progress_label.setStyleSheet("color: #cccccc;")
+        self.eta_label.setText(f"Preparing to download {days_to_download} days of data...")
+        self.eta_label.setStyleSheet("color: #ffaa00; font-size: 14px; font-weight: bold;")
 
         self.worker = DownloadWorker(
             ticker, api_key, self.data_dir, start_date, end_date, mode
@@ -570,19 +642,39 @@ class DownloadTab(QWidget):
         """Handle progress updates from worker."""
         self.progress_label.setText(message)
 
+        # Parse ETA from message and display prominently
+        if "ETA:" in message:
+            # Extract ETA portion
+            eta_start = message.find("ETA:")
+            eta_str = message[eta_start:].split("|")[0].strip()  # "ETA: 5m 30s"
+            self.eta_label.setText(f"⏱️ {eta_str}")
+        elif "Rate limit pause" in message:
+            # Show waiting message
+            self.eta_label.setText("⏸️ Rate limit pause (Polygon free tier: 5 calls/min)")
+        elif "Saving" in message or "Merging" in message:
+            self.eta_label.setText("💾 Saving data to file...")
+
     def _on_finished(self, success: bool, message: str):
         """Handle download completion."""
         self.download_btn.setEnabled(True)
         self.update_btn.setEnabled(True)
+        self.prepend_btn.setEnabled(True)
+        self.auto_detect_btn.setEnabled(True)
         self.cancel_btn.setEnabled(False)
 
         if success:
+            self.status_label.setText("✅ DOWNLOAD COMPLETE")
+            self.status_label.setStyleSheet("color: #00ff00; font-size: 16px; font-weight: bold;")
             self.progress_label.setText(message)
             self.progress_label.setStyleSheet("color: #00ff00;")
+            self.eta_label.setText("")
             self._update_data_info()  # Refresh preview
         else:
+            self.status_label.setText("❌ DOWNLOAD FAILED")
+            self.status_label.setStyleSheet("color: #ff4444; font-size: 16px; font-weight: bold;")
             self.progress_label.setText(message)
             self.progress_label.setStyleSheet("color: #ff4444;")
+            self.eta_label.setText("")
 
     def _save_settings(self):
         """Save settings to QSettings."""
@@ -603,6 +695,93 @@ class DownloadTab(QWidget):
         """Update data directory."""
         self.data_dir = path
         self._update_data_info()
+
+    def _auto_detect_dates(self):
+        """Auto-detect dates to prepend 1 year before existing data."""
+        ticker = self.ticker_combo.currentText().strip().upper()
+        if not ticker:
+            QMessageBox.warning(self, "No Ticker", "Please select a ticker first.")
+            return
+
+        # Find the earliest date in existing data
+        data_file = Path(self.data_dir) / f"{ticker}_NT.txt"
+
+        if not data_file.exists():
+            QMessageBox.information(
+                self, "No Existing Data",
+                f"No existing data for {ticker}. Use 'Download (1 Year)' button instead."
+            )
+            return
+
+        try:
+            # Read first line to get earliest date
+            with open(data_file, 'r') as f:
+                first_line = f.readline().strip()
+
+            first_date_str = first_line.split(';')[0].split()[0]  # YYYYMMDD
+            first_date = datetime.strptime(first_date_str, '%Y%m%d')
+
+            # Set end date to 1 day before existing data starts
+            end_date = first_date - timedelta(days=1)
+
+            # Set start date to 1 year before that
+            start_date = end_date - timedelta(days=365)
+
+            # Polygon free tier limit: 2 years of historical data
+            # Clamp start_date to not exceed 2 years from today
+            two_years_ago = datetime.now() - timedelta(days=730)  # ~2 years
+            was_clamped = False
+            if start_date < two_years_ago:
+                start_date = two_years_ago
+                was_clamped = True
+
+            # Update the date edits
+            self.start_date_edit.setDate(QDate(start_date.year, start_date.month, start_date.day))
+            self.end_date_edit.setDate(QDate(end_date.year, end_date.month, end_date.day))
+
+            if was_clamped:
+                self.progress_label.setText(
+                    f"Dates set (clamped to Polygon 2-year limit): "
+                    f"{start_date.strftime('%m/%d/%Y')} - {end_date.strftime('%m/%d/%Y')}"
+                )
+                self.progress_label.setStyleSheet("color: #ffaa00;")
+            else:
+                self.progress_label.setText(
+                    f"Dates set to prepend 1 year before existing data "
+                    f"({start_date.strftime('%m/%d/%Y')} - {end_date.strftime('%m/%d/%Y')})"
+                )
+                self.progress_label.setStyleSheet("color: #00ff00;")
+
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Could not detect dates: {e}")
+
+    def _start_prepend(self):
+        """Start downloading custom date range and merge with existing data."""
+        if not self._validate_inputs():
+            return
+
+        ticker = self.ticker_combo.currentText().strip().upper()
+        api_key = self.api_key_input.text().strip()
+
+        # Get dates from the date edits
+        start_qdate = self.start_date_edit.date()
+        end_qdate = self.end_date_edit.date()
+
+        start_date = datetime(start_qdate.year(), start_qdate.month(), start_qdate.day())
+        end_date = datetime(end_qdate.year(), end_qdate.month(), end_qdate.day())
+
+        if start_date >= end_date:
+            QMessageBox.warning(
+                self, "Invalid Dates",
+                "Start date must be before end date."
+            )
+            return
+
+        days_to_fetch = (end_date - start_date).days
+        self.progress_label.setText(f"Downloading {days_to_fetch} days of data...")
+
+        # Use "update" mode so it merges with existing data
+        self._start_worker(ticker, api_key, start_date, end_date, "update")
 
     def _rebuild_stats(self):
         """Rebuild distribution statistics for the current ticker."""

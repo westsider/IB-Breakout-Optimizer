@@ -15,6 +15,7 @@ from desktop_ui.tabs.forward_tests_tab import ForwardTestsTab
 from desktop_ui.tabs.walk_forward_tab import WalkForwardTab
 from desktop_ui.tabs.trade_browser_tab import TradeBrowserTab
 from desktop_ui.tabs.ib_analysis_tab import IBAnalysisTab
+from desktop_ui.tabs.filter_analysis_tab import FilterAnalysisTab
 from desktop_ui.tabs.equity_curve_tab import EquityCurveTab
 from desktop_ui.tabs.download_tab import DownloadTab
 from desktop_ui.tabs.monitoring_tab import MonitoringTab
@@ -88,6 +89,12 @@ class MainWindow(QMainWindow):
         # Help menu
         help_menu = menubar.addMenu("&Help")
 
+        wf_guide_action = QAction("How to &Walk-Forward Test and Trade", self)
+        wf_guide_action.triggered.connect(self._show_walk_forward_guide)
+        help_menu.addAction(wf_guide_action)
+
+        help_menu.addSeparator()
+
         about_action = QAction("&About", self)
         about_action.triggered.connect(self._show_about)
         help_menu.addAction(about_action)
@@ -121,6 +128,7 @@ class MainWindow(QMainWindow):
         self.forward_tests_tab = ForwardTestsTab(self.data_dir, self.output_dir)
         self.trade_browser_tab = TradeBrowserTab(self.data_dir)
         self.ib_analysis_tab = IBAnalysisTab()
+        self.filter_analysis_tab = FilterAnalysisTab(self.data_dir)
         self.equity_curve_tab = EquityCurveTab()
         self.monitoring_tab = MonitoringTab(self.data_dir)
         self.ml_filter_tab = MLFilterTab(self.data_dir, self.output_dir)
@@ -144,6 +152,7 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.equity_curve_tab, "Equity Curve")
         self.tabs.addTab(self.trade_browser_tab, "Trade Browser")
         self.tabs.addTab(self.ib_analysis_tab, "IB Analysis")
+        self.tabs.addTab(self.filter_analysis_tab, "Filter Analysis")
         self.tabs.addTab(self.monitoring_tab, "Monitoring")
         self.tabs.addTab(self.ml_filter_tab, "ML Filter")
         self.tabs.addTab(self.saved_tests_tab, "Saved Tests")
@@ -203,6 +212,7 @@ class MainWindow(QMainWindow):
             self.ml_filter_tab.set_data_dir(directory)
             self.forward_tests_tab.set_data_dir(directory)
             self.walk_forward_tab.set_data_dir(directory)
+            self.filter_analysis_tab.set_data_dir(directory)
 
             self.status_label.setText(f"Data directory set to: {directory}")
 
@@ -319,6 +329,78 @@ class MainWindow(QMainWindow):
         else:
             self.status_label.setText(f"Saved test for {ticker}")
             self.status_label.setStyleSheet("color: #2a82da;")
+
+    def _show_walk_forward_guide(self):
+        """Show walk-forward testing and trading guide."""
+        guide_text = """
+        <h2>Walk-Forward Testing & Trading Guide</h2>
+
+        <h3>What is Walk-Forward Analysis?</h3>
+        <p>Walk-forward analysis validates your strategy by simulating how it would perform
+        if you re-optimized periodically. It divides your data into rolling windows:</p>
+        <ul>
+            <li><b>In-Sample (IS)</b>: Training period where parameters are optimized</li>
+            <li><b>Out-of-Sample (OOS)</b>: Forward test period using IS parameters</li>
+        </ul>
+
+        <h3>Recommended Settings</h3>
+        <table border="1" cellpadding="5" style="border-collapse: collapse;">
+            <tr><th>Setting</th><th>Value</th><th>Rationale</th></tr>
+            <tr><td>Train Window</td><td>12 months</td><td>Enough data for statistical significance</td></tr>
+            <tr><td>Test Window</td><td>1 week</td><td>Matches weekly re-optimization cycle</td></tr>
+            <tr><td>Preset</td><td>Standard or Quick</td><td>Balance between thoroughness and speed</td></tr>
+        </table>
+
+        <h3>Weekly Re-optimization Workflow</h3>
+        <p>Once walk-forward validates your approach, use this weekly cycle:</p>
+        <table border="1" cellpadding="5" style="border-collapse: collapse;">
+            <tr><th>Day</th><th>Action</th></tr>
+            <tr><td>Friday Close</td><td>Week's trading ends</td></tr>
+            <tr><td>Weekend</td><td>Run optimization with last 12 months of data</td></tr>
+            <tr><td>Monday</td><td>Use new optimized parameters for live trading</td></tr>
+            <tr><td>Mon-Fri</td><td>Trade with these parameters</td></tr>
+            <tr><td>Repeat</td><td>Next weekend, re-optimize with fresh data</td></tr>
+        </table>
+
+        <h3>How Parameters Roll Forward</h3>
+        <pre>
+Week 1: Optimize months 1-12  → Trade week 13
+Week 2: Optimize months 1.25-12.25 → Trade week 14
+Week 3: Optimize months 1.5-12.5 → Trade week 15
+        </pre>
+
+        <h3>Key Metrics to Watch</h3>
+        <ul>
+            <li><b>Period Win Rate > 60%</b>: Most OOS weeks are profitable</li>
+            <li><b>Efficiency Ratio > 50%</b>: OOS captures at least half of IS edge</li>
+            <li><b>OOS Profit Factor > 1.5</b>: Good risk/reward in forward tests</li>
+        </ul>
+
+        <h3>When to Go Live</h3>
+        <p>Your strategy is ready for live trading when:</p>
+        <ol>
+            <li>Walk-forward shows consistent OOS profitability across multiple periods</li>
+            <li>Period Win Rate exceeds 50% (preferably 60%+)</li>
+            <li>Efficiency Ratio shows IS edge transfers to OOS</li>
+            <li>OOS metrics (P&L, PF, Win Rate) meet your trading requirements</li>
+        </ol>
+
+        <h3>Tips</h3>
+        <ul>
+            <li>Use the <b>Save</b> button to store successful walk-forward results</li>
+            <li>Compare different filter combinations to find robust setups</li>
+            <li>Longer IS periods (12mo) are generally more robust than shorter ones</li>
+            <li>1-week OOS matches a practical weekly re-optimization schedule</li>
+        </ul>
+        """
+
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Walk-Forward Testing & Trading Guide")
+        msg.setTextFormat(Qt.RichText)
+        msg.setText(guide_text)
+        msg.setStandardButtons(QMessageBox.Ok)
+        msg.setMinimumWidth(700)
+        msg.exec()
 
     def _show_about(self):
         """Show about dialog."""

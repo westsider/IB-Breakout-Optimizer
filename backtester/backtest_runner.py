@@ -131,6 +131,18 @@ class BacktestRunner:
         # Create and run strategy
         strategy = IBBreakoutStrategy(params)
 
+        # Calculate statistical filter data if any filter mode is not 'any'
+        if (params.gap_filter_mode != 'any' or
+            params.trend_filter_mode != 'any' or
+            params.range_filter_mode != 'any'):
+            strategy.calculate_filter_data_from_df(
+                df,
+                trend_lookback=params.prior_days_lookback,
+                range_lookback=params.daily_range_lookback
+            )
+            if verbose:
+                print(f"  Statistical filters: gap={params.gap_filter_mode}, trend={params.trend_filter_mode}, range={params.range_filter_mode}")
+
         if verbose:
             print(f"\nRunning strategy...")
             print(f"  IB Duration: {params.ib_duration_minutes} min")

@@ -57,7 +57,7 @@ This file provides context and guidance for Claude Code when working with this p
 
 **Desktop App (PySide6) - Primary**
 - Native desktop application with professional dark theme
-- 11 tabs: Optimization, Walk-Forward, Portfolio, Forward Tests, Equity Curve, Trade Browser, IB Analysis, Monitoring, ML Filter, Saved Tests, Download
+- 12 tabs: Optimization, Walk-Forward, Portfolio, Forward Tests, Equity Curve, Trade Browser, IB Analysis, Filter Analysis, Monitoring, ML Filter, Saved Tests, Download
 - QThread workers for non-blocking background processing
 - Live progress updates with elapsed time and ETA
 - Two-phase optimization (Grid + Bayesian) with presets (quick, standard, full, thorough)
@@ -102,6 +102,26 @@ This file provides context and guidance for Claude Code when working with this p
   - Results persisted to `output/forward_tests/forward_tests.json`
 - **Statistical filter dropdowns** in Optimization tab for gap, trend, and range filters
 - **Rebuild Stats button** in Download tab to recompute distribution stats after new data
+- **Filter Analysis tab** for visualizing filter calculations
+  - Interactive daily candlestick chart with horizontal scrolling
+  - Gap % visualization with shaded areas between prior close and open
+  - Prior days trend indicators (bullish/bearish dots)
+  - Daily range % bars showing volatility
+  - Crosshair with detailed data panel showing all filter values
+  - Mouse wheel zoom (5-30 days visible)
+  - Shows both prior 5-day average volatility AND today's range for clarity
+- **Walk-Forward tab enhancements**
+  - Save button to export results as JSON
+  - Settings persistence (ticker, windows, filters) via QSettings
+  - OOS Length metric showing total out-of-sample months tested
+  - $/Month metric showing average monthly P&L
+  - Help menu: "How to Walk-Forward Test and Trade" guide
+- **Download tab enhancements**
+  - Custom date range inputs (Start Date / End Date) with calendar picker
+  - "Auto-Detect Gap" button to find 1 year prior to existing data
+  - "Download & Merge" button to prepend historical data
+  - Automatic 2-year limit clamping for Polygon.io free tier
+  - Prominent download progress display with status header and ETA
 
 **Streamlit App - Alternative**
 - Streamlit app scaffold (`ui/app.py`)
@@ -274,7 +294,8 @@ C:\Users\Warren\Projects\ib_breakout_optimizer\
 │   │   ├── saved_tests_tab.py # Saved test results storage
 │   │   ├── forward_tests_tab.py # Forward testing with live data
 │   │   ├── walk_forward_tab.py # Walk-forward analysis with OOS testing
-│   │   └── download_tab.py    # Polygon.io data download + rebuild stats
+│   │   ├── filter_analysis_tab.py # Filter visualization and verification
+│   │   └── download_tab.py    # Polygon.io data download + prepend historical
 │   ├── workers/
 │   │   ├── backtest_worker.py # Background backtest thread
 │   │   └── optimization_worker.py # Background optimization thread

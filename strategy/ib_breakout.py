@@ -126,6 +126,12 @@ class StrategyParams:
     max_avg_daily_range_percent: float = 100.0  # Maximum average daily range %
     daily_range_lookback: int = 5  # Days to average for daily range
 
+    # Statistical filter modes (used by optimizer and walk-forward)
+    # These are percentile-based filters calculated from historical data
+    gap_filter_mode: str = "any"  # "any", "middle_68", "exclude_middle_68", "directional", "reverse_directional"
+    trend_filter_mode: str = "any"  # "any", "with_trend", "counter_trend"
+    range_filter_mode: str = "any"  # "any", "middle_68", "above_68", "below_median", "middle_68_or_below"
+
 
 class IBBreakoutStrategy:
     """
@@ -188,6 +194,12 @@ class IBBreakoutStrategy:
         self.trades: List[Trade] = []
         self.trade_counter = 0
 
+        # Statistical filter data (calculated from historical daily data)
+        # These are set by set_filter_data() before running backtest
+        self.filter_data: Dict[datetime, Dict] = {}  # date -> {gap_pct, bullish_count, avg_range_pct}
+        self.gap_percentiles: Tuple[float, float] = (0.0, 0.0)  # (p16, p84)
+        self.range_percentiles: Tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)  # (p16, p50, p68, p84)
+
     def reset(self):
         """Reset all strategy state."""
         self.primary_state = StrategyState()
@@ -196,6 +208,96 @@ class IBBreakoutStrategy:
         self.qqq_ib_calc._reset_state()
         self.trades = []
         self.trade_counter = 0
+
+    def set_filter_data(
+        self,
+        filter_data: Dict,
+        gap_percentiles: Tuple[float, float],
+        range_percentiles: Tuple[float, float, float, float]
+    ):
+        """
+        Set pre-calculated statistical filter data.
+
+        This should be called before running the backtest with statistical filters.
+        The data matches what mmap_grid_search.py calculates.
+
+        Args:
+            filter_data: Dict mapping date -> {gap_pct, bullish_count, avg_range_pct}
+            gap_percentiles: (p16, p84) for gap % distribution
+            range_percentiles: (p16, p50, p68, p84) for avg range % distribution
+        """
+        self.filter_data = filter_data
+        self.gap_percentiles = gap_percentiles
+        self.range_percentiles = range_percentiles
+
+    def calculate_filter_data_from_df(self, df, trend_lookback: int = 3, range_lookback: int = 5):
+        """
+        Calculate filter data from a DataFrame of minute bars.
+
+        This method processes the bar data to compute daily filter values,
+        matching the logic in mmap_grid_search.py.
+
+        Args:
+            df: DataFrame with columns: timestamp, open, high, low, close
+            trend_lookback: Number of prior days for trend calculation
+            range_lookback: Number of prior days for range calculation
+        """
+        import numpy as np
+
+        # Aggregate to daily OHLC
+        df = df.copy()
+        df['date'] = df['timestamp'].dt.date
+
+        daily = df.groupby('date').agg({
+            'open': 'first',
+            'high': 'max',
+            'low': 'min',
+            'close': 'last'
+        }).reset_index()
+
+        # Calculate gap % (today's open - yesterday's close) / yesterday's close * 100
+        daily['prior_close'] = daily['close'].shift(1)
+        daily['gap_pct'] = (daily['open'] - daily['prior_close']) / daily['prior_close'] * 100
+
+        # Calculate bullish count over lookback period
+        daily['bullish'] = (daily['close'] > daily['open']).astype(int)
+        daily['bullish_count'] = daily['bullish'].shift(1).rolling(trend_lookback).sum()
+
+        # Calculate avg daily range %
+        daily['range_pct'] = (daily['high'] - daily['low']) / daily['low'] * 100
+        daily['avg_range_pct'] = daily['range_pct'].shift(1).rolling(range_lookback).mean()
+
+        # Build filter_data dict
+        self.filter_data = {}
+        for _, row in daily.iterrows():
+            date_key = row['date']
+            self.filter_data[date_key] = {
+                'gap_pct': row['gap_pct'] if not np.isnan(row['gap_pct']) else None,
+                'bullish_count': row['bullish_count'] if not np.isnan(row['bullish_count']) else None,
+                'avg_range_pct': row['avg_range_pct'] if not np.isnan(row['avg_range_pct']) else None,
+                'trend_lookback': trend_lookback
+            }
+
+        # Calculate percentiles from non-null values
+        gap_values = daily['gap_pct'].dropna().values
+        if len(gap_values) > 0:
+            self.gap_percentiles = (
+                float(np.percentile(gap_values, 16)),
+                float(np.percentile(gap_values, 84))
+            )
+        else:
+            self.gap_percentiles = (0.0, 0.0)
+
+        range_values = daily['avg_range_pct'].dropna().values
+        if len(range_values) > 0:
+            self.range_percentiles = (
+                float(np.percentile(range_values, 16)),
+                float(np.percentile(range_values, 50)),
+                float(np.percentile(range_values, 68)),
+                float(np.percentile(range_values, 84))
+            )
+        else:
+            self.range_percentiles = (0.0, 0.0, 0.0, 0.0)
 
     def process_bar(
         self,
@@ -319,7 +421,7 @@ class IBBreakoutStrategy:
             self.primary_state.ib_calculated and
             not self.primary_state.trade_taken_today and
             self._is_trading_time_allowed(bar.timestamp) and
-            self._passes_filters(bar)):
+            self._passes_filters(bar, is_long)):
 
             return self._generate_entry_signal(bar, is_long)
 
@@ -486,12 +588,13 @@ class IBBreakoutStrategy:
         current_time = timestamp.time()
         return self.trading_start <= current_time <= self.trading_end
 
-    def _passes_filters(self, bar: Bar) -> bool:
+    def _passes_filters(self, bar: Bar, is_long: bool = True) -> bool:
         """
         Check if trade passes all filters.
 
         Args:
             bar: Current bar
+            is_long: True if this is a long trade, False for short
 
         Returns:
             True if all filters pass
@@ -523,6 +626,93 @@ class IBBreakoutStrategy:
         elif self.primary_state.signal_time:
             if self.primary_state.signal_time.time() > self.max_breakout:
                 return False
+
+        # =====================================================================
+        # STATISTICAL FILTERS (match mmap_grid_search.py logic)
+        # =====================================================================
+        trade_date = bar.timestamp.date()
+        trade_dir = 'long' if is_long else 'short'
+
+        # Get filter data for this date
+        day_data = self.filter_data.get(trade_date, {})
+        day_gap = day_data.get('gap_pct')
+        day_range = day_data.get('avg_range_pct')
+        bullish_count = day_data.get('bullish_count')
+        trend_lookback = day_data.get('trend_lookback', self.params.prior_days_lookback)
+
+        # Get percentiles
+        gap_p16, gap_p84 = self.gap_percentiles
+        range_p16, range_p50, range_p68, range_p84 = self.range_percentiles
+
+        # ---------------------------------------------------------------------
+        # GAP FILTER MODE
+        # ---------------------------------------------------------------------
+        gap_mode = self.params.gap_filter_mode
+        if gap_mode != 'any' and day_gap is not None:
+            if gap_mode == 'middle_68':
+                # Only trade gaps within middle 68% (normal days)
+                if not (gap_p16 <= day_gap <= gap_p84):
+                    return False
+            elif gap_mode == 'exclude_middle_68':
+                # Only trade extreme gap days
+                if gap_p16 <= day_gap <= gap_p84:
+                    return False
+            elif gap_mode == 'directional':
+                # Gap up = longs only, Gap down = shorts only
+                if day_gap > 0 and trade_dir == 'short':
+                    return False
+                elif day_gap < 0 and trade_dir == 'long':
+                    return False
+            elif gap_mode == 'reverse_directional':
+                # Gap up = shorts only (fade), Gap down = longs only
+                if day_gap > 0 and trade_dir == 'long':
+                    return False
+                elif day_gap < 0 and trade_dir == 'short':
+                    return False
+
+        # ---------------------------------------------------------------------
+        # TREND FILTER MODE
+        # ---------------------------------------------------------------------
+        trend_mode = self.params.trend_filter_mode
+        if trend_mode != 'any' and bullish_count is not None:
+            bearish_count = trend_lookback - bullish_count
+            is_bullish_trend = bullish_count > bearish_count
+            is_bearish_trend = bearish_count > bullish_count
+
+            if trend_mode == 'with_trend':
+                # Trade with the trend
+                if is_bullish_trend and trade_dir == 'short':
+                    return False
+                elif is_bearish_trend and trade_dir == 'long':
+                    return False
+            elif trend_mode == 'counter_trend':
+                # Trade against the trend (mean reversion)
+                if is_bullish_trend and trade_dir == 'long':
+                    return False
+                elif is_bearish_trend and trade_dir == 'short':
+                    return False
+
+        # ---------------------------------------------------------------------
+        # RANGE (VOLATILITY) FILTER MODE
+        # ---------------------------------------------------------------------
+        range_mode = self.params.range_filter_mode
+        if range_mode != 'any' and day_range is not None:
+            if range_mode == 'middle_68':
+                # Only trade normal volatility days
+                if not (range_p16 <= day_range <= range_p84):
+                    return False
+            elif range_mode == 'above_68':
+                # Only trade high volatility days
+                if day_range <= range_p68:
+                    return False
+            elif range_mode == 'below_median':
+                # Only trade low volatility days
+                if day_range >= range_p50:
+                    return False
+            elif range_mode == 'middle_68_or_below':
+                # Trade if normal OR below normal volatility
+                if day_range > range_p84:
+                    return False
 
         return True
 

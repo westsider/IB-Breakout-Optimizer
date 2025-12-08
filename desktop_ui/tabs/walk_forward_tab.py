@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QHeaderView, QProgressBar,
     QSplitter, QFrame
 )
-from PySide6.QtCore import Qt, Signal, QThread
+from PySide6.QtCore import Qt, Signal, QThread, QSettings
 from PySide6.QtGui import QColor
 from PySide6.QtWebEngineWidgets import QWebEngineView
 
@@ -152,17 +152,17 @@ class WalkForwardWorker(QThread):
                 preset_name = self.preset.split(" ")[0]
                 space = create_parameter_space(preset_name)
 
-                # Apply statistical filters
+                # Apply statistical filters - fix specific filter value by setting choices
                 if self.gap_filter != "any":
-                    space.parameters['gap_filter_mode'].values = [self.gap_filter]
+                    space.parameters['gap_filter_mode'].choices = [self.gap_filter]
                     space.parameters['gap_filter_mode'].enabled = True
 
                 if self.trend_filter != "any":
-                    space.parameters['trend_filter_mode'].values = [self.trend_filter]
+                    space.parameters['trend_filter_mode'].choices = [self.trend_filter]
                     space.parameters['trend_filter_mode'].enabled = True
 
                 if self.range_filter != "any":
-                    space.parameters['range_filter_mode'].values = [self.range_filter]
+                    space.parameters['range_filter_mode'].choices = [self.range_filter]
                     space.parameters['range_filter_mode'].enabled = True
 
                 # Run optimization on training period
@@ -291,7 +291,11 @@ class WalkForwardTab(QWidget):
         self.worker = None
         self.results = None
 
+        # Load settings
+        self.settings = QSettings("TradingTools", "IBBreakoutOptimizer")
+
         self._setup_ui()
+        self._load_settings()
         self._update_date_range()
 
     def _setup_ui(self):
@@ -357,6 +361,13 @@ class WalkForwardTab(QWidget):
         self.cancel_button.setEnabled(False)
         self.cancel_button.clicked.connect(self._cancel)
         settings_grid.addWidget(self.cancel_button, 0, 12)
+
+        self.save_button = QPushButton("Save")
+        self.save_button.setMinimumHeight(28)
+        self.save_button.setEnabled(False)
+        self.save_button.setToolTip("Save the most recent period's parameters to Saved Tests")
+        self.save_button.clicked.connect(self._save_result)
+        settings_grid.addWidget(self.save_button, 0, 13)
 
         # Row 1: Statistical filters + progress
         filters_label = QLabel("Filters:")
@@ -452,6 +463,18 @@ class WalkForwardTab(QWidget):
         self.period_wr_card = MetricCard("Period Win%", compact=True)
         self.period_wr_card.setToolTip("% of periods that were profitable out-of-sample")
         metrics_row.addWidget(self.period_wr_card)
+
+        sep3 = QLabel("|")
+        sep3.setStyleSheet("color: #444444;")
+        metrics_row.addWidget(sep3)
+
+        self.oos_length_card = MetricCard("OOS Length", compact=True)
+        self.oos_length_card.setToolTip("Total out-of-sample testing period")
+        metrics_row.addWidget(self.oos_length_card)
+
+        self.monthly_pnl_card = MetricCard("$/Month", compact=True)
+        self.monthly_pnl_card.setToolTip("Average monthly P&L based on OOS results")
+        metrics_row.addWidget(self.monthly_pnl_card)
 
         metrics_row.addStretch()
         layout.addLayout(metrics_row)
@@ -680,6 +703,7 @@ class WalkForwardTab(QWidget):
         """Handle walk-forward completion."""
         self.run_button.setEnabled(True)
         self.cancel_button.setEnabled(False)
+        self.save_button.setEnabled(True)
         self.results = results
 
         num_periods = results['num_periods']
@@ -706,6 +730,41 @@ class WalkForwardTab(QWidget):
         period_wr = results['period_win_rate']
         wr_color = "#00ff00" if period_wr >= 60 else "#ffaa00" if period_wr >= 40 else "#ff4444"
         self.period_wr_card.set_value(f"{period_wr:.0f}%", wr_color)
+
+        # Calculate OOS length and monthly P&L from periods
+        periods = results.get('periods', [])
+        if periods:
+            # Get first and last OOS dates
+            first_oos_start = periods[0].test_start
+            last_oos_end = periods[-1].test_end
+
+            # Parse dates and calculate total OOS days
+            try:
+                from datetime import datetime
+                start_date = datetime.strptime(first_oos_start, '%Y-%m-%d')
+                end_date = datetime.strptime(last_oos_end, '%Y-%m-%d')
+                total_oos_days = (end_date - start_date).days
+                total_oos_months = total_oos_days / 30.0
+
+                # Display OOS length
+                if total_oos_months >= 1:
+                    self.oos_length_card.set_value(f"{total_oos_months:.1f} mo")
+                else:
+                    self.oos_length_card.set_value(f"{total_oos_days} days")
+
+                # Calculate monthly P&L
+                if total_oos_months > 0:
+                    monthly_pnl = oos_pnl / total_oos_months
+                    monthly_color = "#00ff00" if monthly_pnl >= 0 else "#ff4444"
+                    self.monthly_pnl_card.set_value(f"${monthly_pnl:,.0f}", monthly_color)
+                else:
+                    self.monthly_pnl_card.set_value("N/A")
+            except Exception:
+                self.oos_length_card.set_value(f"{num_periods} wks")
+                self.monthly_pnl_card.set_value("N/A")
+        else:
+            self.oos_length_card.set_value("N/A")
+            self.monthly_pnl_card.set_value("N/A")
 
         # Update comparison chart
         self._update_comparison_chart(results['periods'])
@@ -829,3 +888,150 @@ class WalkForwardTab(QWidget):
     def set_output_dir(self, path: str):
         """Update output directory."""
         self.output_dir = path
+
+    def _save_result(self):
+        """Save the walk-forward results to disk."""
+        if not self.results:
+            self.status_label.setText("No results to save")
+            return
+
+        try:
+            # Create output directory
+            save_dir = Path(self.output_dir) / "walk_forward_results"
+            save_dir.mkdir(parents=True, exist_ok=True)
+
+            # Get the last period's parameters (most recent optimization)
+            periods = self.results.get('periods', [])
+            if not periods:
+                self.status_label.setText("No periods to save")
+                return
+
+            # Get ticker and create filename with timestamp
+            ticker = self.ticker_combo.currentText()
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            filename = f"{ticker}_wf_{timestamp}.json"
+            filepath = save_dir / filename
+
+            # Build comprehensive save data
+            save_data = {
+                'ticker': ticker,
+                'timestamp': timestamp,
+                'settings': {
+                    'train_months': int(self.train_combo.currentText().split()[0]),
+                    'test_weeks': int(self.test_combo.currentText().split()[0]),
+                    'preset': self.preset_combo.currentText(),
+                    'objective': self.objective_combo.currentText(),
+                    'gap_filter': self.gap_filter_combo.currentText(),
+                    'trend_filter': self.trend_filter_combo.currentText(),
+                    'range_filter': self.range_filter_combo.currentText()
+                },
+                'summary': {
+                    'num_periods': self.results.get('num_periods', 0),
+                    'total_is_pnl': self.results.get('total_is_pnl', 0),
+                    'total_oos_pnl': self.results.get('total_oos_pnl', 0),
+                    'oos_profit_factor': self.results.get('oos_profit_factor', 0),
+                    'total_oos_trades': self.results.get('total_oos_trades', 0),
+                    'efficiency_ratio': self.results.get('efficiency_ratio', 0),
+                    'period_win_rate': self.results.get('period_win_rate', 0)
+                },
+                'periods': [
+                    {
+                        'period_num': p.period_num,
+                        'train_start': p.train_start,
+                        'train_end': p.train_end,
+                        'test_start': p.test_start,
+                        'test_end': p.test_end,
+                        'best_params': p.best_params,
+                        'is_trades': p.is_trades,
+                        'is_pnl': p.is_pnl,
+                        'is_pf': p.is_pf,
+                        'is_win_rate': p.is_win_rate,
+                        'oos_trades': p.oos_trades,
+                        'oos_pnl': p.oos_pnl,
+                        'oos_pf': p.oos_pf,
+                        'oos_win_rate': p.oos_win_rate
+                    }
+                    for p in periods
+                ],
+                'final_equity_curve': self.results.get('oos_equity_curve', [])
+            }
+
+            # Save to file
+            with open(filepath, 'w') as f:
+                json.dump(save_data, f, indent=2)
+
+            self.status_label.setText(f"Saved to {filename}")
+            self.status_label.setStyleSheet("color: #00ff00;")
+
+        except Exception as e:
+            self.status_label.setText(f"Save error: {str(e)[:50]}")
+            self.status_label.setStyleSheet("color: #ff4444;")
+
+    def _load_settings(self):
+        """Load saved settings from QSettings."""
+        # Ticker
+        ticker = self.settings.value("wf_ticker", "TSLA")
+        idx = self.ticker_combo.findText(ticker)
+        if idx >= 0:
+            self.ticker_combo.setCurrentIndex(idx)
+
+        # Train window
+        train = self.settings.value("wf_train", "12 months")
+        idx = self.train_combo.findText(train)
+        if idx >= 0:
+            self.train_combo.setCurrentIndex(idx)
+
+        # Test window
+        test = self.settings.value("wf_test", "1 week")
+        idx = self.test_combo.findText(test)
+        if idx >= 0:
+            self.test_combo.setCurrentIndex(idx)
+
+        # Objective
+        objective = self.settings.value("wf_objective", "profit_factor")
+        idx = self.objective_combo.findText(objective)
+        if idx >= 0:
+            self.objective_combo.setCurrentIndex(idx)
+
+        # Preset
+        preset = self.settings.value("wf_preset", "quick (96)")
+        idx = self.preset_combo.findText(preset)
+        if idx >= 0:
+            self.preset_combo.setCurrentIndex(idx)
+
+        # Filters
+        gap = self.settings.value("wf_gap_filter", "any")
+        idx = self.gap_filter_combo.findText(gap)
+        if idx >= 0:
+            self.gap_filter_combo.setCurrentIndex(idx)
+
+        trend = self.settings.value("wf_trend_filter", "any")
+        idx = self.trend_filter_combo.findText(trend)
+        if idx >= 0:
+            self.trend_filter_combo.setCurrentIndex(idx)
+
+        range_f = self.settings.value("wf_range_filter", "any")
+        idx = self.range_filter_combo.findText(range_f)
+        if idx >= 0:
+            self.range_filter_combo.setCurrentIndex(idx)
+
+        # Connect signals to save on change (after loading)
+        self.ticker_combo.currentTextChanged.connect(self._save_settings)
+        self.train_combo.currentTextChanged.connect(self._save_settings)
+        self.test_combo.currentTextChanged.connect(self._save_settings)
+        self.objective_combo.currentTextChanged.connect(self._save_settings)
+        self.preset_combo.currentTextChanged.connect(self._save_settings)
+        self.gap_filter_combo.currentTextChanged.connect(self._save_settings)
+        self.trend_filter_combo.currentTextChanged.connect(self._save_settings)
+        self.range_filter_combo.currentTextChanged.connect(self._save_settings)
+
+    def _save_settings(self):
+        """Save current settings to QSettings."""
+        self.settings.setValue("wf_ticker", self.ticker_combo.currentText())
+        self.settings.setValue("wf_train", self.train_combo.currentText())
+        self.settings.setValue("wf_test", self.test_combo.currentText())
+        self.settings.setValue("wf_objective", self.objective_combo.currentText())
+        self.settings.setValue("wf_preset", self.preset_combo.currentText())
+        self.settings.setValue("wf_gap_filter", self.gap_filter_combo.currentText())
+        self.settings.setValue("wf_trend_filter", self.trend_filter_combo.currentText())
+        self.settings.setValue("wf_range_filter", self.range_filter_combo.currentText())
